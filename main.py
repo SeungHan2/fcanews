@@ -26,7 +26,7 @@ LOG_FILE = "sent_log.json"
 NEWS_COUNT = 20             # 최대 수집 기사 수
 DISPLAY_PER_CALL = 100      # 네이버 API 한 번에 요청할 기사 수
 MAX_LOOPS = 5               # 최대 5회 반복 호출 (100x5=500개까지)
-REQUEST_TIMEOUT = 10        # 요청 타임아웃(초)
+REQUEST_TIMEOUT = 30        # 요청 타임아웃(초)
 MIN_SEND_THRESHOLD = 5      # 5개 미만이면 스킵
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 

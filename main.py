@@ -5,7 +5,6 @@ import urllib.parse
 from dotenv import load_dotenv
 import html
 import json
-import email.utils
 from bs4 import BeautifulSoup
 from datetime import datetime
 
@@ -27,12 +26,11 @@ NEWS_COUNT = 10
 DISPLAY_PER_CALL = 100
 MAX_LOOPS = 10
 REQUEST_TIMEOUT = 10
-PAUSE_BETWEEN_MSGS = 0.5
 
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 
 # ───────────────────────────────────────────────────────────
-# 유틸 함수들
+# 유틸 함수
 # ───────────────────────────────────────────────────────────
 def load_keywords(file_path):
     if not os.path.exists(file_path):
@@ -107,7 +105,7 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
     return collected[:NEWS_COUNT]
 
 # ───────────────────────────────────────────────────────────
-# 텔레그램 전송 함수
+# 텔레그램 전송
 # ───────────────────────────────────────────────────────────
 def send_to_telegram(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -119,7 +117,7 @@ def send_to_telegram(message):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False  # 카드 미리보기 활성화
     }
 
     try:
@@ -145,32 +143,31 @@ if __name__ == "__main__":
     found = search_recent_news(search_keywords, filter_keywords, sent_before)
     new_items = [(t, l) for (t, l) in found if l not in sent_before]
 
-    # 새 뉴스가 없을 때
     if not new_items:
         send_to_telegram("🔎 새 뉴스가 없습니다!")
         exit(0)
 
-    # ✅ 공지 메시지 (현재 시각 기준)
+    # ───── 공지 메시지 ─────
     now = datetime.now()
     date_str = now.strftime("%Y.%m.%d(%a) %H시")
-    header_msg = f"📢 <b>{date_str} 기준 새 뉴스 {len(new_items)}개 입니다.</b>"
-    send_to_telegram(header_msg)
-    time.sleep(1.0)
+    header_msg = f"📢 <b>{date_str} 기준 새 뉴스 {len(new_items)}개 입니다.</b>\n\n"
+    body_lines = []
 
-    # ✅ 각 뉴스 전송
-    sent_count = 0
-    for title, link in new_items:
+    # ───── 뉴스 본문 묶기 ─────
+    for i, (title, link) in enumerate(new_items, start=1):
         viewer_url = f"https://fcanews-viewer.onrender.com/view?url={urllib.parse.quote(link)}"
-        message = f"📰 <b>{html.escape(title)}</b>\n{viewer_url}"
+        line = f"{i}. <b>{html.escape(title)}</b>\n{viewer_url}\n원문: {link}\n"
+        body_lines.append(line)
+        sent_before.add(link)
 
-        if send_to_telegram(message):
-            sent_before.add(link)
-            sent_count += 1
-            time.sleep(PAUSE_BETWEEN_MSGS)
+    # ───── 종료 메시지 ─────
+    footer_msg = "\n✅ 발송 완료!"
 
-    # ✅ 마지막 공지
-    send_to_telegram("✅ 발송 완료!")
+    # 전체 메시지 조립
+    full_message = header_msg + "\n".join(body_lines) + footer_msg
 
-    # 로그 저장
+    # 전송
+    send_to_telegram(full_message)
     save_sent_log(sent_before)
-    print(f"✅ 전송 완료: {sent_count}건")
+
+    print(f"✅ 전송 완료: {len(new_items)}건")

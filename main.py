@@ -23,11 +23,11 @@ LOG_FILE = "sent_log.json"
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-NEWS_COUNT = 20             # 최대 수집 기사 수
-DISPLAY_PER_CALL = 100      # 네이버 API 한 번에 요청할 기사 수
-MAX_LOOPS = 5               # 최대 5회 반복 호출 (100x5=500개까지)
-REQUEST_TIMEOUT = 30        # 요청 타임아웃(초)
-MIN_SEND_THRESHOLD = 5      # 5개 미만이면 스킵
+NEWS_COUNT = 20
+DISPLAY_PER_CALL = 100
+MAX_LOOPS = 5
+REQUEST_TIMEOUT = 30
+MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "")
@@ -65,6 +65,11 @@ def clear_sent_log():
 # 뉴스 검색
 # ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords, sent_before):
+    """
+    - 네이버 뉴스 최신순 검색
+    - sent_before(이전 발송 로그)에 포함된 뉴스 발견 시 즉시 중단
+    - 동일 링크 중복 방지
+    """
     base_url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
         "X-Naver-Client-Id": CLIENT_ID,
@@ -73,12 +78,13 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
     }
 
     collected = []
+    seen_links = set()
     start = 1
-    loop_count = 0
-    stop_search = False
 
-    while len(collected) < NEWS_COUNT and loop_count < MAX_LOOPS and not stop_search:
-        loop_count += 1
+    for loop_count in range(MAX_LOOPS):
+        if len(collected) >= NEWS_COUNT:
+            break
+
         query = " ".join(search_keywords)
         url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={start}&sort=date"
 
@@ -101,13 +107,17 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             title_clean = title_raw.replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
 
-            # 이전 발송 기사 등장 시 즉시 중단
+            # 이미 보낸 뉴스면 즉시 중단
             if link in sent_before:
-                stop_search = True
-                print("⏹ 이전 뉴스 등장, 검색 중단")
-                break
+                print("⏹ 이전 뉴스 등장 → 검색 중단")
+                return collected
 
-            # 제목에 필터 키워드 포함 시 저장
+            # 중복 방지
+            if link in seen_links:
+                continue
+            seen_links.add(link)
+
+            # 제목 필터 키워드 포함 시만 저장
             if any(k.lower() in title_clean.lower() for k in filter_keywords):
                 collected.append((title_clean, link))
                 if len(collected) >= NEWS_COUNT:
@@ -170,9 +180,8 @@ if __name__ == "__main__":
         send_to_telegram("🔎 새 뉴스가 없습니다!")
         exit(0)
 
-    # 메시지 구성
-    date_str = now.strftime("%Y.%m.%d(%a) %H시")
-    header = f"📢 <b>{date_str} 기준 새 뉴스 {len(found)}개 입니다.</b>\n\n"
+    # 메시지 구성 (공지에서 날짜/시간 제거)
+    header = f"📢 <b>새 뉴스 {len(found)}개</b>\n\n"
     lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
     footer = "\n✅ 발송 완료!"
     message = header + "\n".join(lines) + footer

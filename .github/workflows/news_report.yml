@@ -2,26 +2,41 @@ name: FCANews Telegram Reporter
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # 2시간 단위 (UTC 기준 → 한국시간 매 2,4,6,8,...시)
+    # ──────────────────────────────────────────────────────────────
+    # GitHub Actions는 UTC 기준으로 작동하므로, 한국시간(+9)을 보정해야 합니다.
+    #   - cron: '0 1-23/2 * * *'
+    #     → UTC 1시, 3시, 5시, ..., 23시 실행
+    #     → 한국시간 10시, 12시, 14시, ..., 다음날 8시 실행
+    # 
+    #   즉, 한국시간 기준:
+    #     ✅ 00시, 06시, 12시, 18시 → 6시간 주기 발송 (무조건 발송 + 로그 초기화)
+    #     ⏸ 02시, 04시, 08시, 10시, 14시, 16시, 20시, 22시 → 5개 이상일 때만 발송
+    #
+    # 하루 12회 실행 (2시간 간격)
+    # ──────────────────────────────────────────────────────────────
+    - cron: '0 1-23/2 * * *'
+
+  # 🧩 수동 테스트 실행용 (GitHub Actions → Run workflow 버튼)
   workflow_dispatch:
 
 jobs:
   send-news:
     runs-on: ubuntu-latest
+    name: Send FCAnyang News Report
 
     steps:
-      - name: Checkout repository
+      - name: 🧾 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Send FCANews Report
+      - name: 🚀 Send FCANews Report
         env:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}

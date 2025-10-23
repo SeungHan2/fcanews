@@ -2,44 +2,46 @@ name: FCANews Telegram Reporter
 
 on:
   schedule:
-    # ──────────────────────────────────────────────────────────────
-    # GitHub Actions는 UTC 기준으로 작동하므로, 한국시간(+9)을 보정해야 합니다.
-    #   - cron: '0 1-23/2 * * *'
-    #     → UTC 1시, 3시, 5시, ..., 23시 실행
-    #     → 한국시간 10시, 12시, 14시, ..., 다음날 8시 실행
-    # 
-    #   즉, 한국시간 기준:
-    #     ✅ 00시, 06시, 12시, 18시 → 6시간 주기 발송 (무조건 발송 + 로그 초기화)
-    #     ⏸ 02시, 04시, 08시, 10시, 14시, 16시, 20시, 22시 → 5개 이상일 때만 발송
-    #
-    # 하루 12회 실행 (2시간 간격)
-    # ──────────────────────────────────────────────────────────────
-    - cron: '0 1-23/2 * * *'
-
-  # 🧩 수동 테스트 실행용 (GitHub Actions → Run workflow 버튼)
+    - cron: '0 1-23/2 * * *'  # UTC 기준 홀수 시각 → 한국시간 짝수 시각(0,2,4,...,22)에 실행
   workflow_dispatch:
 
 jobs:
   send-news:
     runs-on: ubuntu-latest
-    name: Send FCAnyang News Report
 
     steps:
-      - name: 🧾 Checkout repository
+      # 1️⃣ 리포지토리 체크아웃
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # git push 권한 유지
 
-      - name: 🐍 Set up Python
+      # 2️⃣ Python 환경 설정
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 📦 Install dependencies
+      # 3️⃣ 의존성 설치
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: 🚀 Send FCANews Report
+      # 4️⃣ 메인 스크립트 실행
+      - name: Run FCANews Reporter
         env:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: python main.py
+
+      # 5️⃣ sent_log.json 커밋 및 푸시
+      - name: Commit updated sent_log.json
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add sent_log.json
+          git commit -m "update sent_log.json [skip ci]" || echo "No changes to commit"
+          git push

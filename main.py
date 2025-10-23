@@ -5,8 +5,8 @@ import urllib.parse
 from dotenv import load_dotenv
 import html
 import json
-from bs4 import BeautifulSoup
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 # ───────────────────────────────────────────────────────────
 # 환경변수 로드 (.env)
@@ -117,7 +117,7 @@ def send_to_telegram(message):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": True  # ✅ 미리보기 제거
     }
 
     try:
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     date_str = now.strftime("%Y.%m.%d(%a) %H시")
     header_msg = f"📢 <b>{date_str} 기준 새 뉴스 {len(new_items)}개 입니다.</b>\n\n"
 
-    # 뉴스 묶기 (Render 뷰어 제거, 원문 링크만)
+    # 뉴스 본문 묶기 (원문 링크만)
     body_lines = []
     for i, (title, link) in enumerate(new_items, start=1):
         line = f"{i}. <b>{html.escape(title)}</b>\n{link}\n"
@@ -160,7 +160,6 @@ if __name__ == "__main__":
         sent_before.add(link)
 
     footer_msg = "\n✅ 발송 완료!"
-
     full_message = header_msg + "\n".join(body_lines) + footer_msg
 
     send_to_telegram(full_message)

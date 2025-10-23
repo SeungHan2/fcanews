@@ -18,9 +18,10 @@ CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Telegraph API: https://api.telegra.ph
-# access_token은 최초 1회 createAccount 후 발급/보관
-TELEGRAPH_ACCESS_TOKEN = os.getenv("TELEGRAPH_ACCESS_TOKEN")  # ★ 추가
+# render 뷰어
+viewer_url = f"https://fcanews-viewer.onrender.com/view?url={urllib.parse.quote(link)}"
+bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=viewer_url)
+
 
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"

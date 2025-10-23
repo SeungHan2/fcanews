@@ -117,7 +117,7 @@ def send_to_telegram(message):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False  # 카드 미리보기 활성화
+        "disable_web_page_preview": False
     }
 
     try:
@@ -147,26 +147,22 @@ if __name__ == "__main__":
         send_to_telegram("🔎 새 뉴스가 없습니다!")
         exit(0)
 
-    # ───── 공지 메시지 ─────
+    # 공지 메시지
     now = datetime.now()
     date_str = now.strftime("%Y.%m.%d(%a) %H시")
     header_msg = f"📢 <b>{date_str} 기준 새 뉴스 {len(new_items)}개 입니다.</b>\n\n"
-    body_lines = []
 
-    # ───── 뉴스 본문 묶기 ─────
+    # 뉴스 묶기 (Render 뷰어 제거, 원문 링크만)
+    body_lines = []
     for i, (title, link) in enumerate(new_items, start=1):
-        viewer_url = f"https://fcanews-viewer.onrender.com/view?url={urllib.parse.quote(link)}"
-        line = f"{i}. <b>{html.escape(title)}</b>\n{viewer_url}\n원문: {link}\n"
+        line = f"{i}. <b>{html.escape(title)}</b>\n{link}\n"
         body_lines.append(line)
         sent_before.add(link)
 
-    # ───── 종료 메시지 ─────
     footer_msg = "\n✅ 발송 완료!"
 
-    # 전체 메시지 조립
     full_message = header_msg + "\n".join(body_lines) + footer_msg
 
-    # 전송
     send_to_telegram(full_message)
     save_sent_log(sent_before)
 

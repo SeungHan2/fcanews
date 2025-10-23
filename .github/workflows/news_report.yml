@@ -2,8 +2,7 @@ name: FCANews Telegram Reporter
 
 on:
   schedule:
-    # 매일 한국시간 23시, 06시, 12시, 18시 실행
-    - cron: '0 14,21,3,9 * * *'
+    - cron: '0 */2 * * *'  # 2시간 단위 (UTC 기준 → 한국시간 매 2,4,6,8,...시)
   workflow_dispatch:
 
 jobs:

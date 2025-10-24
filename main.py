@@ -4,7 +4,7 @@ import urllib.parse
 from dotenv import load_dotenv
 import html
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # ─────────────────────────────────────────────
 # 환경 변수 로드
@@ -29,7 +29,7 @@ NEWS_COUNT = 20
 DISPLAY_PER_CALL = 100
 MAX_LOOPS = 2
 REQUEST_TIMEOUT = 30
-MIN_SEND_THRESHOLD = 5
+MIN_SEND_THRESHOLD = 5  # 5개 이하일 경우 보류
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "")
@@ -57,11 +57,6 @@ def load_sent_log():
 def save_sent_log(sent_ids):
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(sorted(list(sent_ids)), f, ensure_ascii=False, indent=2)
-
-def clear_sent_log():
-    if os.path.exists(LOG_FILE):
-        os.remove(LOG_FILE)
-        print("🧹 로그 초기화 완료")
 
 def load_call_count():
     if os.path.exists(CALL_LOG_FILE):
@@ -179,18 +174,25 @@ if __name__ == "__main__":
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
 
-    now = datetime.now()
+    # ✅ 한국시간 기준으로 현재 시각 계산
+    KST = timezone(timedelta(hours=9))
+    now = datetime.now(KST)
     hour = now.hour
-    is_six_hour_cycle = (hour % 6 == 0)
 
-    print(f"🕒 현재 {hour}시 | 테스트 런: {IS_TEST_RUN} | 6시간 주기: {is_six_hour_cycle}")
+    # ✅ 하루 4회 강제 발송 타임 (한국시간 기준)
+    is_force_cycle = hour in [0, 6, 12, 18]
+
+    print(f"🕒 현재 (한국시간) {now.strftime('%Y-%m-%d %H:%M:%S')} | 테스트 런: {IS_TEST_RUN} | 강제 발송 타임: {is_force_cycle}")
 
     sent_before = set() if IS_TEST_RUN else load_sent_log()
-    found, filter_pass_count, stop_reason, api_calls, total_fetched = search_recent_news(search_keywords, filter_keywords, sent_before)
+    found, filter_pass_count, stop_reason, api_calls, total_fetched = search_recent_news(
+        search_keywords, filter_keywords, sent_before
+    )
 
-    should_send = is_six_hour_cycle or len(found) >= MIN_SEND_THRESHOLD
+    # ✅ 발송 조건: 5개 이상이거나 강제 발송 타임
+    should_send = is_force_cycle or len(found) >= MIN_SEND_THRESHOLD
 
-    # ✅ 보류인 경우 실제 발송기사 수는 0개로 표시
+    # ✅ 발송 처리
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
@@ -200,29 +202,33 @@ if __name__ == "__main__":
         send_to_telegram("🔎 새 뉴스가 없습니다!")
         sent_count = 0
     else:
-        sent_count = 0  # ✅ 보류 시 발송 0개로 표시
+        sent_count = 0  # 보류 시 0개
 
-    # ✅ 보류 시 sent_log에 추가하지 않음
+    # ✅ sent_log 관리 (보류 시 기록 안 함)
     if not IS_TEST_RUN:
-        if is_six_hour_cycle:
-            clear_sent_log()
-        elif should_send and found:
+        if should_send and found:
             for _, link in found:
                 sent_before.add(link)
+
+            # 🔹 sent_log.json 최대 100개 유지
+            if len(sent_before) > 100:
+                sent_before = set(list(sent_before)[-100:])
+
             save_sent_log(sent_before)
         else:
             print("⏸️ 보류 상태 - sent_log.json 갱신 안 함")
 
-    # 호출 로그
+    # ✅ 호출 로그 저장
     call_count, total_articles = load_call_count()
     call_count += 1
     total_articles += len(found)
     save_call_count(call_count, total_articles)
 
-    # 관리자 리포트
+    # ✅ 관리자 리포트
     admin_msg = (
         "📊 <b>관리자 리포트</b>\n"
         f"🧩 모드: {'🧪 테스트' if IS_TEST_RUN else '⚙️ 정상'}\n"
+        f"🕒 기준시간: {now.strftime('%Y-%m-%d %H:%M:%S (KST)')}\n"
         f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
         f"📰 발송기사: <b>{sent_count}개</b>\n"
         f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_fetched}건)\n"
@@ -232,4 +238,4 @@ if __name__ == "__main__":
 
     send_to_telegram(admin_msg, chat_id=ADMIN_CHAT_ID)
 
-    print(f"✅ 전송 완료 ({sent_count}건) | {'테스트' if IS_TEST_RUN else '정상'} 모드")
+    print(f"✅ 전송 완료 ({sent_count}건) | {'테스트' if IS_TEST_RUN else '정상'} 모드 | 한국시간 {now.strftime('%H:%M')}")

@@ -25,9 +25,9 @@ CALL_LOG_FILE = "call_count.json"
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-NEWS_COUNT = 20
-DISPLAY_PER_CALL = 100
-MAX_LOOPS = 5
+NEWS_COUNT = 20             # 최대 발송 기사 수
+DISPLAY_PER_CALL = 30       # 🔹 네이버 API 호출당 가져올 기사 수
+MAX_LOOPS = 5               # 최대 5회 반복 호출
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
@@ -90,6 +90,7 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
 
     collected = []
     filter_pass_count = 0
+    total_fetched = 0
     start = 1
     loop_count = 0
     stop_reason = None
@@ -110,6 +111,8 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             break
 
         items = r.json().get("items", [])
+        total_fetched += len(items)  # 🔹 이번 요청에서 가져온 기사 수 누적
+
         if not items:
             stop_reason = "더 이상 결과 없음"
             break
@@ -138,7 +141,7 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             stop_reason = "호출 최대치 도달"
             break
 
-    return collected, filter_pass_count, stop_reason, loop_count
+    return collected, filter_pass_count, stop_reason, loop_count, total_fetched
 
 # ─────────────────────────────────────────────
 # 텔레그램 전송
@@ -183,7 +186,7 @@ if __name__ == "__main__":
     print(f"🕒 현재 {hour}시 | 테스트 런: {IS_TEST_RUN} | 6시간 주기: {is_six_hour_cycle}")
 
     sent_before = set() if IS_TEST_RUN else load_sent_log()
-    found, filter_pass_count, stop_reason, api_calls = search_recent_news(search_keywords, filter_keywords, sent_before)
+    found, filter_pass_count, stop_reason, api_calls, total_fetched = search_recent_news(search_keywords, filter_keywords, sent_before)
 
     should_send = is_six_hour_cycle or len(found) >= MIN_SEND_THRESHOLD
 
@@ -210,13 +213,13 @@ if __name__ == "__main__":
     total_articles += len(found)
     save_call_count(call_count, total_articles)
 
-    # 🧩 관리자 보고 메시지
+    # 🧩 관리자 리포트
     admin_msg = (
         "📊 <b>관리자 리포트</b>\n"
         f"🧩 모드: {'🧪 테스트' if IS_TEST_RUN else '⚙️ 정상'}\n"
         f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
         f"📰 발송기사: <b>{len(found)}개</b>\n"
-        f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_articles}건)\n"
+        f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_fetched}건)\n"
         f"🔍 제목 필터 통과: <b>{filter_pass_count}개</b>\n"
         f"🛑 호출 중단 사유: <b>{stop_reason or '없음'}</b>"
     )

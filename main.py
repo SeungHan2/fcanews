@@ -4,6 +4,8 @@ import urllib.parse
 from dotenv import load_dotenv
 import html
 import json
+import time
+import schedule
 from datetime import datetime, timedelta, timezone
 
 # ─────────────────────────────────────────────
@@ -21,6 +23,7 @@ SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"
 LOG_FILE = "sent_log.json"
 CALL_LOG_FILE = "call_count.json"
+LOCK_FILE = "/tmp/fcanews.lock"
 
 # ─────────────────────────────────────────────
 # 설정값
@@ -29,14 +32,30 @@ NEWS_COUNT = 20
 DISPLAY_PER_CALL = 100
 MAX_LOOPS = 2
 REQUEST_TIMEOUT = 30
-MIN_SEND_THRESHOLD = 5  # 5개 이하일 경우 보류
+MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
-
-EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "")
-IS_TEST_RUN = EVENT_NAME == "workflow_dispatch"
+KST = timezone(timedelta(hours=9))
 
 # ─────────────────────────────────────────────
-# 파일 입출력 유틸
+# 락 파일 관리 (중복 실행 방지)
+# ─────────────────────────────────────────────
+def already_running():
+    if os.path.exists(LOCK_FILE):
+        mtime = os.path.getmtime(LOCK_FILE)
+        if (time.time() - mtime) < 600:  # 10분 이내 락 유지
+            print("⚠️ 이미 실행 중인 프로세스 감지 → 종료")
+            return True
+    with open(LOCK_FILE, "w") as f:
+        f.write(datetime.now().isoformat())
+    return False
+
+def clear_lock():
+    if os.path.exists(LOCK_FILE):
+        os.remove(LOCK_FILE)
+        print("🧹 락 파일 제거 완료")
+
+# ─────────────────────────────────────────────
+# 파일 입출력
 # ─────────────────────────────────────────────
 def load_keywords(file_path):
     if not os.path.exists(file_path):
@@ -55,8 +74,11 @@ def load_sent_log():
         return set()
 
 def save_sent_log(sent_ids):
+    sent_list = sorted(list(sent_ids))
+    if len(sent_list) > 100:
+        sent_list = sent_list[-100:]
     with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(sorted(list(sent_ids)), f, ensure_ascii=False, indent=2)
+        json.dump(sent_list, f, ensure_ascii=False, indent=2)
 
 def load_call_count():
     if os.path.exists(CALL_LOG_FILE):
@@ -168,31 +190,25 @@ def send_to_telegram(message, chat_id=None):
         return False
 
 # ─────────────────────────────────────────────
-# 메인
+# 메인 실행 로직
 # ─────────────────────────────────────────────
-if __name__ == "__main__":
+def run_bot():
+    now = datetime.now(KST)
+    hour = now.hour
+    is_force_cycle = hour in [0, 6, 12, 18]
+
+    print(f"🕒 현재 (한국시간) {now.strftime('%Y-%m-%d %H:%M:%S')} | 강제 발송 타임: {is_force_cycle}")
+
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
 
-    # ✅ 한국시간 기준으로 현재 시각 계산
-    KST = timezone(timedelta(hours=9))
-    now = datetime.now(KST)
-    hour = now.hour
-
-    # ✅ 하루 4회 강제 발송 타임 (한국시간 기준)
-    is_force_cycle = hour in [0, 6, 12, 18]
-
-    print(f"🕒 현재 (한국시간) {now.strftime('%Y-%m-%d %H:%M:%S')} | 테스트 런: {IS_TEST_RUN} | 강제 발송 타임: {is_force_cycle}")
-
-    sent_before = set() if IS_TEST_RUN else load_sent_log()
+    sent_before = load_sent_log()
     found, filter_pass_count, stop_reason, api_calls, total_fetched = search_recent_news(
         search_keywords, filter_keywords, sent_before
     )
 
-    # ✅ 발송 조건: 5개 이상이거나 강제 발송 타임
     should_send = is_force_cycle or len(found) >= MIN_SEND_THRESHOLD
 
-    # ✅ 발송 처리
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
@@ -202,32 +218,22 @@ if __name__ == "__main__":
         send_to_telegram("🔎 새 뉴스가 없습니다!")
         sent_count = 0
     else:
-        sent_count = 0  # 보류 시 0개
+        sent_count = 0
 
-    # ✅ sent_log 관리 (보류 시 기록 안 함)
-    if not IS_TEST_RUN:
-        if should_send and found:
-            for _, link in found:
-                sent_before.add(link)
+    if should_send and found:
+        for _, link in found:
+            sent_before.add(link)
+        save_sent_log(sent_before)
+    else:
+        print("⏸️ 보류 상태 - sent_log.json 갱신 안 함")
 
-            # 🔹 sent_log.json 최대 100개 유지
-            if len(sent_before) > 100:
-                sent_before = set(list(sent_before)[-100:])
-
-            save_sent_log(sent_before)
-        else:
-            print("⏸️ 보류 상태 - sent_log.json 갱신 안 함")
-
-    # ✅ 호출 로그 저장
     call_count, total_articles = load_call_count()
     call_count += 1
     total_articles += len(found)
     save_call_count(call_count, total_articles)
 
-    # ✅ 관리자 리포트
     admin_msg = (
         "📊 <b>관리자 리포트</b>\n"
-        f"🧩 모드: {'🧪 테스트' if IS_TEST_RUN else '⚙️ 정상'}\n"
         f"🕒 기준시간: {now.strftime('%Y-%m-%d %H:%M:%S (KST)')}\n"
         f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
         f"📰 발송기사: <b>{sent_count}개</b>\n"
@@ -235,7 +241,27 @@ if __name__ == "__main__":
         f"🔍 제목 필터 통과: <b>{filter_pass_count}개</b>\n"
         f"🛑 호출 중단 사유: <b>{stop_reason or '없음'}</b>"
     )
-
     send_to_telegram(admin_msg, chat_id=ADMIN_CHAT_ID)
 
-    print(f"✅ 전송 완료 ({sent_count}건) | {'테스트' if IS_TEST_RUN else '정상'} 모드 | 한국시간 {now.strftime('%H:%M')}")
+    print(f"✅ 전송 완료 ({sent_count}건) | {now.strftime('%H:%M')}")
+
+# ─────────────────────────────────────────────
+# Render Background Worker 루프 (2시간 주기)
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    if already_running():
+        exit(0)
+
+    print("🚀 fcanews bot 시작 (Render Background Worker)")
+
+    schedule.every(2).hours.do(run_bot)
+    run_bot()  # 첫 실행 즉시 수행
+
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    except KeyboardInterrupt:
+        print("🛑 Render 종료 신호 감지 - 종료 중")
+    finally:
+        clear_lock()

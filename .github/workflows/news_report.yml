@@ -2,7 +2,7 @@ name: FCANews Telegram Reporter
 
 on:
   schedule:
-    - cron: '0 1-23/2 * * *'  # 🔹 UTC 홀수 시각 (KST 짝수 시각 0,2,4,...,22)에 실행
+  #  - cron: '0 1-23/2 * * *'  # 🔹 UTC 홀수 시각 (KST 짝수 시각 0,2,4,...,22)에 실행
   workflow_dispatch:            # 🔹 수동 테스트 런 가능
 
 jobs:

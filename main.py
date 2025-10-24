@@ -25,7 +25,7 @@ LOG_FILE = "sent_log.json"
 # 설정값
 # ─────────────────────────────────────────────
 NEWS_COUNT = 20
-DISPLAY_PER_CALL = 100
+DISPLAY_PER_CALL = 30
 MAX_LOOPS = 5
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 5

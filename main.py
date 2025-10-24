@@ -25,11 +25,11 @@ CALL_LOG_FILE = "call_count.json"
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-NEWS_COUNT = 20             # 최대 수집 기사 수
-DISPLAY_PER_CALL = 100      # 네이버 API 한 번에 요청할 기사 수
-MAX_LOOPS = 5               # 최대 5회 반복 호출 (100x5=500개까지)
-REQUEST_TIMEOUT = 30        # 요청 타임아웃(초)
-MIN_SEND_THRESHOLD = 5      # 5개 미만이면 스킵
+NEWS_COUNT = 20
+DISPLAY_PER_CALL = 100
+MAX_LOOPS = 5
+REQUEST_TIMEOUT = 30
+MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 
 EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "")
@@ -119,12 +119,10 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             title_clean = title_raw.replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
 
-            # 이전 발송 기사 감지 시 중단
             if link in sent_before:
                 stop_reason = "이전 발송 기사 감지"
                 break
 
-            # 제목 필터 통과 확인
             if any(k.lower() in title_clean.lower() for k in filter_keywords):
                 filter_pass_count += 1
                 collected.append((title_clean, link))
@@ -140,7 +138,7 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             stop_reason = "호출 최대치 도달"
             break
 
-    return collected, filter_pass_count, stop_reason
+    return collected, filter_pass_count, stop_reason, loop_count
 
 # ─────────────────────────────────────────────
 # 텔레그램 전송
@@ -185,15 +183,13 @@ if __name__ == "__main__":
     print(f"🕒 현재 {hour}시 | 테스트 런: {IS_TEST_RUN} | 6시간 주기: {is_six_hour_cycle}")
 
     sent_before = set() if IS_TEST_RUN else load_sent_log()
-    found, filter_pass_count, stop_reason = search_recent_news(search_keywords, filter_keywords, sent_before)
+    found, filter_pass_count, stop_reason, api_calls = search_recent_news(search_keywords, filter_keywords, sent_before)
 
-    # 발송 여부 판단
     should_send = is_six_hour_cycle or len(found) >= MIN_SEND_THRESHOLD
 
     if not IS_TEST_RUN and not should_send:
         print(f"⏸ 기사 {len(found)}개 (<{MIN_SEND_THRESHOLD}), 발송 생략")
 
-    # 메시지 전송
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
@@ -201,7 +197,6 @@ if __name__ == "__main__":
     elif not found:
         send_to_telegram("🔎 새 뉴스가 없습니다!")
 
-    # 로그 업데이트
     if not IS_TEST_RUN:
         if is_six_hour_cycle:
             clear_sent_log()
@@ -210,21 +205,20 @@ if __name__ == "__main__":
                 sent_before.add(link)
             save_sent_log(sent_before)
 
-    # 호출 카운트 업데이트
     call_count, total_articles = load_call_count()
     call_count += 1
     total_articles += len(found)
     save_call_count(call_count, total_articles)
 
-    # 관리자 보고 메시지
+    # 🧩 관리자 보고 메시지
     admin_msg = (
         "📊 <b>관리자 리포트</b>\n"
-        f"모드: {'테스트' if IS_TEST_RUN else '정상'}\n"
-        f"발송여부: {'발송' if should_send else '보류'}\n"
-        f"발송기사: {len(found)}개\n"
-        f"총 호출(건수): {call_count}회 ({total_articles}건)\n"
-        f"제목 필터 통과: {filter_pass_count}개\n"
-        f"호출 중단 사유: {stop_reason or '없음'}"
+        f"🧩 모드: {'🧪 테스트' if IS_TEST_RUN else '⚙️ 정상'}\n"
+        f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
+        f"📰 발송기사: <b>{len(found)}개</b>\n"
+        f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_articles}건)\n"
+        f"🔍 제목 필터 통과: <b>{filter_pass_count}개</b>\n"
+        f"🛑 호출 중단 사유: <b>{stop_reason or '없음'}</b>"
     )
 
     send_to_telegram(admin_msg, chat_id=ADMIN_CHAT_ID)

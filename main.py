@@ -26,8 +26,8 @@ CALL_LOG_FILE = "call_count.json"
 # 설정값
 # ─────────────────────────────────────────────
 NEWS_COUNT = 20             # 최대 발송 기사 수
-DISPLAY_PER_CALL = 30       # 🔹 네이버 API 호출당 가져올 기사 수
-MAX_LOOPS = 5               # 최대 5회 반복 호출
+DISPLAY_PER_CALL = 100      # 🔹 네이버 API 호출당 가져올 기사 수
+MAX_LOOPS = 2               # 최대 반복 호출
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"

@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 import html
 import json
 import time
-import schedule
 from datetime import datetime, timedelta, timezone
 
 # ─────────────────────────────────────────────
@@ -246,22 +245,30 @@ def run_bot():
     print(f"✅ 전송 완료 ({sent_count}건) | {now.strftime('%H:%M')}")
 
 # ─────────────────────────────────────────────
-# Render Background Worker 루프 (2시간 주기)
+# 정시 대기 함수
+# ─────────────────────────────────────────────
+def wait_until_next_even_hour():
+    now = datetime.now(KST)
+    next_even_hour = (now.replace(minute=0, second=0, microsecond=0)
+                      + timedelta(hours=2 - (now.hour % 2)))
+    sleep_seconds = (next_even_hour - now).total_seconds()
+    print(f"🕓 다음 실행 예정: {next_even_hour.strftime('%H:%M')} (대기 {int(sleep_seconds/60)}분)")
+    time.sleep(sleep_seconds)
+
+# ─────────────────────────────────────────────
+# Render 루프
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():
         exit(0)
 
-    print("🚀 fcanews bot 시작 (Render Background Worker)")
-
-    schedule.every(2).hours.do(run_bot)
-    run_bot()  # 첫 실행 즉시 수행
+    print("🚀 fcanews bot (Render 크론형 정시 실행) 시작")
 
     try:
         while True:
-            schedule.run_pending()
-            time.sleep(60)
+            run_bot()
+            wait_until_next_even_hour()
     except KeyboardInterrupt:
-        print("🛑 Render 종료 신호 감지 - 종료 중")
+        print("🛑 종료 신호 감지 - 종료 중")
     finally:
         clear_lock()

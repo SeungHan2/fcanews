@@ -3,7 +3,7 @@ name: FCANews Telegram Reporter
 on:
   schedule:
     # - cron: '0 1-23/2 * * *'  # UTC 기준 홀수 시각 → 한국시간 짝수 시각(0,2,4,...,22)에 실행
-    - cron: '*/10 * * * *'  # 10분마다 실행 (UTC 기준)
+    - cron: '*/30 * * * *'  # 10분마다 실행 (UTC 기준)
   workflow_dispatch:
 
 jobs:

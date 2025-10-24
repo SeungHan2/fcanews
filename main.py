@@ -213,9 +213,9 @@ def run_bot():
         message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
         send_to_telegram(message)
         sent_count = len(found)
-    elif not found:
-        send_to_telegram("🔎 새 뉴스가 없습니다!")
-        sent_count = 0
+    # elif not found:
+        # send_to_telegram("🔎 새 뉴스가 없습니다!")
+        # sent_count = 0
     else:
         sent_count = 0
 

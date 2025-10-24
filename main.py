@@ -210,7 +210,7 @@ def run_bot():
 
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
-        message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
+        message = "\n".join(lines)
         send_to_telegram(message)
         sent_count = len(found)
     # elif not found:

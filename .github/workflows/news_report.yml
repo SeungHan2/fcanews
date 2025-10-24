@@ -2,9 +2,8 @@ name: FCANews Telegram Reporter
 
 on:
   schedule:
-    # - cron: '0 1-23/2 * * *'  # UTC 기준 홀수 시각 → 한국시간 짝수 시각(0,2,4,...,22)에 실행
-    - cron: '*/30 * * * *'  # 10분마다 실행 (UTC 기준)
-  workflow_dispatch:
+    - cron: '0 1-23/2 * * *'  # 🔹 UTC 홀수 시각 (KST 짝수 시각 0,2,4,...,22)에 실행
+  workflow_dispatch:            # 🔹 수동 테스트 런 가능
 
 jobs:
   send-news:
@@ -25,7 +24,9 @@ jobs:
 
       # 3️⃣ 의존성 설치
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
       # 4️⃣ 메인 스크립트 실행
       - name: Run FCANews Reporter

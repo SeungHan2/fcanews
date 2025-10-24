@@ -25,9 +25,9 @@ CALL_LOG_FILE = "call_count.json"
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-NEWS_COUNT = 20             # 최대 발송 기사 수
-DISPLAY_PER_CALL = 100      # 🔹 네이버 API 호출당 가져올 기사 수
-MAX_LOOPS = 2               # 최대 반복 호출
+NEWS_COUNT = 20
+DISPLAY_PER_CALL = 100
+MAX_LOOPS = 2
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 5
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
@@ -111,7 +111,7 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             break
 
         items = r.json().get("items", [])
-        total_fetched += len(items)  # 🔹 이번 요청에서 가져온 기사 수 누적
+        total_fetched += len(items)
 
         if not items:
             stop_reason = "더 이상 결과 없음"
@@ -190,35 +190,41 @@ if __name__ == "__main__":
 
     should_send = is_six_hour_cycle or len(found) >= MIN_SEND_THRESHOLD
 
-    if not IS_TEST_RUN and not should_send:
-        print(f"⏸ 기사 {len(found)}개 (<{MIN_SEND_THRESHOLD}), 발송 생략")
-
+    # ✅ 보류인 경우 실제 발송기사 수는 0개로 표시
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "📰 <b>새 뉴스 요약</b>\n\n" + "\n".join(lines) + "\n✅ 발송 완료!"
         send_to_telegram(message)
+        sent_count = len(found)
     elif not found:
         send_to_telegram("🔎 새 뉴스가 없습니다!")
+        sent_count = 0
+    else:
+        sent_count = 0  # ✅ 보류 시 발송 0개로 표시
 
+    # ✅ 보류 시 sent_log에 추가하지 않음
     if not IS_TEST_RUN:
         if is_six_hour_cycle:
             clear_sent_log()
-        else:
+        elif should_send and found:
             for _, link in found:
                 sent_before.add(link)
             save_sent_log(sent_before)
+        else:
+            print("⏸️ 보류 상태 - sent_log.json 갱신 안 함")
 
+    # 호출 로그
     call_count, total_articles = load_call_count()
     call_count += 1
     total_articles += len(found)
     save_call_count(call_count, total_articles)
 
-    # 🧩 관리자 리포트
+    # 관리자 리포트
     admin_msg = (
         "📊 <b>관리자 리포트</b>\n"
         f"🧩 모드: {'🧪 테스트' if IS_TEST_RUN else '⚙️ 정상'}\n"
         f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
-        f"📰 발송기사: <b>{len(found)}개</b>\n"
+        f"📰 발송기사: <b>{sent_count}개</b>\n"
         f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_fetched}건)\n"
         f"🔍 제목 필터 통과: <b>{filter_pass_count}개</b>\n"
         f"🛑 호출 중단 사유: <b>{stop_reason or '없음'}</b>"
@@ -226,4 +232,4 @@ if __name__ == "__main__":
 
     send_to_telegram(admin_msg, chat_id=ADMIN_CHAT_ID)
 
-    print(f"✅ 전송 완료 ({len(found)}건) | {'테스트' if IS_TEST_RUN else '정상'} 모드")
+    print(f"✅ 전송 완료 ({sent_count}건) | {'테스트' if IS_TEST_RUN else '정상'} 모드")

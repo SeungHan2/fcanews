@@ -51,7 +51,7 @@ LOCK_FILE = "/tmp/fcanews.lock"
 DISPLAY_PER_CALL = 40     # 네이버 한 번 호출당 가져올 수량
 MAX_LOOPS = 2             # 네이버 페이징 호출 횟수
 REQUEST_TIMEOUT = 30
-MIN_SEND_THRESHOLD = 5    # 짝수 시각 발송 최소 개수
+MIN_SEND_THRESHOLD = 3    # 짝수 시각 발송 최소 개수
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
 

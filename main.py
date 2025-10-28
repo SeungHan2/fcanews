@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import urllib.parse
 from dotenv import load_dotenv
@@ -6,6 +7,15 @@ import html
 import json
 import time
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+
+# ─────────────────────────────────────────────
+# 실시간 로그 출력 (버퍼링 방지)
+# ─────────────────────────────────────────────
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 # ─────────────────────────────────────────────
 # 환경 변수 로드
@@ -21,17 +31,15 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"
 LOG_FILE = "sent_log.json"
-CALL_LOG_FILE = "call_count.json"
 LOCK_FILE = "/tmp/fcanews.lock"
 
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-NEWS_COUNT = 20
-DISPLAY_PER_CALL = 100
-MAX_LOOPS = 2
+DISPLAY_PER_CALL = 40     # 필요 시 조정 가능
+MAX_LOOPS = 2              # 호출 페이징 회수
 REQUEST_TIMEOUT = 30
-MIN_SEND_THRESHOLD = 5
+MIN_SEND_THRESHOLD = 5     # 짝수시 발송 최소 기준
 UA = "Mozilla/5.0 (compatible; fcanewsbot/1.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
 
@@ -79,22 +87,8 @@ def save_sent_log(sent_ids):
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(sent_list, f, ensure_ascii=False, indent=2)
 
-def load_call_count():
-    if os.path.exists(CALL_LOG_FILE):
-        with open(CALL_LOG_FILE, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                return data.get("count", 0), data.get("articles", 0)
-            except:
-                return 0, 0
-    return 0, 0
-
-def save_call_count(count, articles):
-    with open(CALL_LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"count": count, "articles": articles}, f, ensure_ascii=False, indent=2)
-
 # ─────────────────────────────────────────────
-# 뉴스 검색
+# 네이버 뉴스 검색 (최대 루프까지 전체 수집: 최대 발송 제한 없음)
 # ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords, sent_before):
     base_url = "https://openapi.naver.com/v1/search/news.json"
@@ -104,14 +98,14 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
         "User-Agent": UA,
     }
 
-    collected = []
-    filter_pass_count = 0
+    collected = []           # 제목 필터 통과 기사(중복 제외) 전부 수집
+    pub_times = []           # 호출된 모든 기사들의 pubDate
     total_fetched = 0
+    loop_reports = []        # 각 호출별 통계
     start = 1
     loop_count = 0
-    stop_reason = None
 
-    while len(collected) < NEWS_COUNT and loop_count < MAX_LOOPS:
+    while loop_count < MAX_LOOPS:
         loop_count += 1
         query = " ".join(search_keywords)
         url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={start}&sort=date"
@@ -119,45 +113,71 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
         try:
             r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         except Exception as e:
-            stop_reason = f"요청 에러: {e}"
+            print(f"❌ 요청 예외: {e}")
             break
 
         if r.status_code != 200:
-            stop_reason = f"요청 실패: {r.status_code}"
+            print(f"❌ 요청 실패: {r.status_code}")
             break
 
         items = r.json().get("items", [])
-        total_fetched += len(items)
-
+        fetched = len(items)
+        total_fetched += fetched
         if not items:
-            stop_reason = "더 이상 결과 없음"
+            print("ℹ️ 더 이상 결과 없음")
             break
+
+        duplicate_skipped = 0
+        filtered_passed = 0
 
         for item in items:
             title_raw = html.unescape(item.get("title", ""))
             title_clean = title_raw.replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
 
+            # 발행 시간 수집 (전체 기사 기준)
+            pub_raw = item.get("pubDate")
+            if pub_raw:
+                try:
+                    pub_dt = parsedate_to_datetime(pub_raw).astimezone(KST)
+                    pub_times.append(pub_dt)
+                except Exception:
+                    pass
+
+            # 이전 발송 중복 제외 (조기 중단하지 않고 계속 검사)
             if link in sent_before:
-                stop_reason = "이전 발송 기사 감지"
-                break
+                duplicate_skipped += 1
+                continue
 
+            # 제목 필터 통과만 수집
             if any(k.lower() in title_clean.lower() for k in filter_keywords):
-                filter_pass_count += 1
+                filtered_passed += 1
                 collected.append((title_clean, link))
-                if len(collected) >= NEWS_COUNT:
-                    stop_reason = "필터 통과 최대치 도달"
-                    break
 
-        if stop_reason:
+        loop_reports.append(
+            {
+                "call_no": loop_count,
+                "fetched": fetched,
+                "duplicate_skipped": duplicate_skipped,
+                "filtered_passed": filtered_passed,
+            }
+        )
+
+        # 최적화: 1회차에서 중복이 한 건이라도 있으면 이후 호출 실익이 낮음 → 중단
+        if loop_count == 1 and duplicate_skipped > 0:
+            print("⏹️ 1회차에서 중복 발견 → 이후 호출 생략")
             break
 
         start += DISPLAY_PER_CALL
-        if loop_count >= MAX_LOOPS:
-            stop_reason = "호출 최대치 도달"
-            break
 
-    return collected, filter_pass_count, stop_reason, loop_count, total_fetched
+    # 기사 시간 범위 (전체 호출된 기사 기준)
+    if pub_times:
+        first_time = min(pub_times).strftime("%m-%d %H:%M")
+        last_time = max(pub_times).strftime("%m-%d %H:%M")
+    else:
+        first_time = last_time = "N/A"
+
+    return collected, loop_reports, total_fetched, first_time, last_time
 
 # ─────────────────────────────────────────────
 # 텔레그램 전송
@@ -200,43 +220,50 @@ def run_bot():
 
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
-
     sent_before = load_sent_log()
-    found, filter_pass_count, stop_reason, api_calls, total_fetched = search_recent_news(
+
+    # 뉴스 검색 (최대 발송 제한 없음)
+    found, loop_reports, total_fetched, first_time, last_time = search_recent_news(
         search_keywords, filter_keywords, sent_before
     )
 
-    should_send = is_force_cycle or (len(found) >= MIN_SEND_THRESHOLD and hour % 2 == 0)
+    # 통계
+    filter_pass_total = sum(r["filtered_passed"] for r in loop_reports)
+    duplicate_total = sum(r["duplicate_skipped"] for r in loop_reports)
+    api_calls = len(loop_reports)
+    non_duplicate_total = total_fetched - duplicate_total
 
+    # 발송 판단: 짝수시 & 최소 개수 or 강제 타임
+    sent_count = len(found)
+    should_send = is_force_cycle or (sent_count >= MIN_SEND_THRESHOLD and hour % 2 == 0)
+
+    # 실제 발송
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "\n".join(lines)
         send_to_telegram(message)
-        sent_count = len(found)
-    else:
-        sent_count = 0
-        print("⏸️ 보류 상태 - 발송 없음")
-
-    if should_send and found:
         for _, link in found:
             sent_before.add(link)
         save_sent_log(sent_before)
     else:
-        print("⏸️ sent_log.json 갱신 안 함")
+        print("⏸️ 보류 상태 - 발송 없음")
 
-    call_count, total_articles = load_call_count()
-    call_count += 1
-    total_articles += len(found)
-    save_call_count(call_count, total_articles)
+    # 호출 상세 요약
+    loop_summary = "\n".join(
+        [f"  • {r['call_no']}회차: {r['fetched']}건 / 중복 {r['duplicate_skipped']} / 제목 {r['filtered_passed']}"
+         for r in loop_reports]
+    )
 
+    # 관리자 리포트 (요청 포맷)
     admin_msg = (
-        "📊 <b>관리자 리포트</b>\n"
-        f"🕒 기준시간: {now.strftime('%Y-%m-%d %H:%M:%S (KST)')}\n"
-        f"📤 발송여부: {'✅ 발송' if should_send else '⏸️ 보류'}\n"
-        f"📰 발송기사: <b>{sent_count}개</b>\n"
-        f"📈 네이버 API 호출: <b>{api_calls}회</b> ({total_fetched}건)\n"
-        f"🔍 제목 필터 통과: <b>{filter_pass_count}개</b>\n"
-        f"🛑 호출 중단 사유: <b>{stop_reason or '없음'}</b>"
+        f"📊 <b>관리자 리포트</b> (기준 {now.strftime('%H:%M:%S KST')})\n"
+        f"- {'✅ 발송' if should_send else '⏸️ 보류'}\n"
+        f"- 발송기사: <b>{sent_count}개</b>\n"
+        f"- 네이버 API 호출: <b>{api_calls}회</b> ({total_fetched}건)\n"
+        f"- 중복 제외 통과: <b>{non_duplicate_total}개</b>\n"
+        f"- 제목 필터 통과: <b>{filter_pass_total}개</b>\n"
+        f"- 호출 상세:\n{loop_summary}\n"
+        f"- 기사시간: {first_time} ~ {last_time}"
     )
     send_to_telegram(admin_msg, chat_id=ADMIN_CHAT_ID)
 
@@ -254,7 +281,7 @@ def wait_until_next_even_hour():
     time.sleep(sleep_seconds)
 
 # ─────────────────────────────────────────────
-# Render 루프 (배포 직후 발송 방지)
+# Render 루프 (배포 직후 발송 방지: 짝수시만 run_bot)
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():

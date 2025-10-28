@@ -9,17 +9,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-# ─────────────────────────────────────────────
-# 실시간 로그 출력 (버퍼링 방지)
-# ─────────────────────────────────────────────
 try:
     sys.stdout.reconfigure(line_buffering=True)
 except Exception:
     pass
 
-# ─────────────────────────────────────────────
-# 환경 변수 로드
-# ─────────────────────────────────────────────
 load_dotenv()
 
 CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
@@ -28,34 +22,23 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
-# ─────────────────────────────────────────────
-# 경로 설정 (Persistent Disk)
-# ─────────────────────────────────────────────
 PERSISTENT_MOUNT = os.getenv("PERSISTENT_MOUNT", "/data")
 os.makedirs(PERSISTENT_MOUNT, exist_ok=True)
 
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"
-
 SENT_LOG_PATH = os.path.join(PERSISTENT_MOUNT, "sent_log.json")
 LAST_SENT_TIME_FILE = os.path.join(PERSISTENT_MOUNT, "last_sent_time.txt")
 LOCK_FILE = "/tmp/fcanews.lock"
 
-# ─────────────────────────────────────────────
-# 설정값
-# ─────────────────────────────────────────────
 DISPLAY_PER_CALL = 30
 MAX_LOOPS = 5
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 3
 UA = "Mozilla/5.0 (compatible; fcanewsbot/2.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
-
 FORCE_HOURS = {0, 6, 12, 18}
 
-# ─────────────────────────────────────────────
-# 락 파일 관리
-# ─────────────────────────────────────────────
 def already_running():
     try:
         if os.path.exists(LOCK_FILE):
@@ -78,9 +61,6 @@ def clear_lock():
     except Exception as e:
         print("⚠️ 락 파일 제거 예외:", e)
 
-# ─────────────────────────────────────────────
-# 동일 시각 중복 방지
-# ─────────────────────────────────────────────
 def _current_hour_str():
     return datetime.now(KST).strftime("%Y-%m-%d %H:00")
 
@@ -101,9 +81,6 @@ def mark_sent_now():
     except Exception as e:
         print("⚠️ 발송 시각 기록 예외:", e)
 
-# ─────────────────────────────────────────────
-# 파일 입출력
-# ─────────────────────────────────────────────
 def ensure_persistent_files():
     if not os.path.exists(SENT_LOG_PATH):
         with open(SENT_LOG_PATH, "w", encoding="utf-8") as f:
@@ -137,9 +114,6 @@ def save_sent_log(sent_ids):
     except Exception as e:
         print("⚠️ sent_log 저장 예외:", e)
 
-# ─────────────────────────────────────────────
-# 뉴스 검색
-# ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords, sent_before):
     base_url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
@@ -148,12 +122,8 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
         "User-Agent": UA,
     }
 
-    collected = []
-    pub_times = []
-    total_fetched = 0
-    loop_reports = []
-    start = 1
-    loop_count = 0
+    collected, pub_times, loop_reports = [], [], []
+    total_fetched, start, loop_count = 0, 1, 0
     detected_prev = False
 
     while loop_count < MAX_LOOPS:
@@ -211,17 +181,11 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
 
         start += DISPLAY_PER_CALL
 
-    if pub_times:
-        latest_time = max(pub_times).strftime("%m-%d %H:%M")
-        earliest_time = min(pub_times).strftime("%m-%d %H:%M")
-    else:
-        latest_time = earliest_time = "N/A"
+    latest_time = max(pub_times).strftime("%m-%d %H:%M") if pub_times else "N/A"
+    earliest_time = min(pub_times).strftime("%m-%d %H:%M") if pub_times else "N/A"
 
     return collected, loop_reports, total_fetched, latest_time, earliest_time, detected_prev
 
-# ─────────────────────────────────────────────
-# 텔레그램 전송
-# ─────────────────────────────────────────────
 def send_to_telegram(message, chat_id=None):
     chat_id = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not chat_id:
@@ -246,9 +210,6 @@ def send_to_telegram(message, chat_id=None):
         print("❌ 텔레그램 전송 예외:", e)
         return False
 
-# ─────────────────────────────────────────────
-# 메인 실행
-# ─────────────────────────────────────────────
 def run_bot():
     now = datetime.now(KST)
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
@@ -266,7 +227,6 @@ def run_bot():
     )
 
     total_title_filtered = sum(r["title_filtered"] for r in loop_reports)
-    total_dup_filtered = sum(r["duplicate_filtered"] for r in loop_reports)
     api_calls = len(loop_reports)
     sent_count = len(found)
 
@@ -289,29 +249,24 @@ def run_bot():
         f"- 제목으로 필터링 후 : <b>{total_title_filtered}</b>건 (합계)\n"
         f"- 중복 필터링 후 : <b>{sent_count}</b>건 (=최종 발송)\n"
         f"- 이전 발송 기사 감지 : <b>{'✅ SUCCESS' if detected_prev else '⚠️ FAIL'}</b>\n"
-        f"- 호출 상세:\n" + "\n".join(
-            [f"  • {r['call_no']}회차: {r['fetched']}건 / 제목 {r['title_filtered']} / 중복 {r['duplicate_filtered']}" for r in loop_reports]
-        ) + f"\n- 기사시간: {latest_time} ~ {earliest_time}"
+        f"- 기사시간: {latest_time} ~ {earliest_time}"
     )
 
     send_to_telegram(report, chat_id=ADMIN_CHAT_ID)
     print(f"✅ 처리 완료 ({sent_count}건)")
 
-# ─────────────────────────────────────────────
-# 대기 함수 (개선된 버전)
-# ─────────────────────────────────────────────
 def wait_until_next_even_hour(last_executed_hour):
     now = datetime.now(KST)
     base = now.replace(minute=0, second=0, microsecond=0)
     add_hours = (2 - (now.hour % 2)) % 2
     next_even = base + timedelta(hours=add_hours)
 
-    # 이미 실행된 시각이면 다음 짝수로 넘김
     if last_executed_hour == now.strftime("%Y-%m-%d %H"):
         next_even += timedelta(hours=2)
-    # minute < 7 동안 재시작된 경우엔 이번 시각 유지
     elif now.hour % 2 == 0 and now.minute < 7:
         next_even = base
+    elif now >= next_even:
+        next_even += timedelta(hours=2)
 
     sleep_seconds = (next_even - now).total_seconds()
     if sleep_seconds < 60:
@@ -319,9 +274,6 @@ def wait_until_next_even_hour(last_executed_hour):
     print(f"🕓 다음 실행 예정: {next_even.strftime('%H:%M')} (대기 {int(sleep_seconds/60)}분)")
     time.sleep(sleep_seconds)
 
-# ─────────────────────────────────────────────
-# 루프
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)

@@ -52,7 +52,6 @@ UA = "Mozilla/5.0 (compatible; fcanewsbot/2.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
 
 FORCE_HOURS = {0, 6, 12, 18}
-BOOT_MARGIN_MINUTES = 2
 
 # ─────────────────────────────────────────────
 # 락 파일 관리
@@ -291,8 +290,7 @@ def run_bot():
         f"- 중복 필터링 후 : <b>{sent_count}</b>건 (=최종 발송)\n"
         f"- 이전 발송 기사 감지 : <b>{'✅ SUCCESS' if detected_prev else '⚠️ FAIL'}</b>\n"
         f"- 호출 상세:\n" + "\n".join(
-            [f"  • {r['call_no']}회차: {r['fetched']}건 / 제목 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
-             for r in loop_reports]
+            [f"  • {r['call_no']}회차: {r['fetched']}건 / 제목 {r['title_filtered']} / 중복 {r['duplicate_filtered']}" for r in loop_reports]
         ) + f"\n- 기사시간: {latest_time} ~ {earliest_time}"
     )
 
@@ -300,19 +298,25 @@ def run_bot():
     print(f"✅ 처리 완료 ({sent_count}건)")
 
 # ─────────────────────────────────────────────
-# 대기 함수
+# 대기 함수 (개선된 버전)
 # ─────────────────────────────────────────────
-def wait_until_next_even_hour():
+def wait_until_next_even_hour(last_executed_hour):
     now = datetime.now(KST)
     base = now.replace(minute=0, second=0, microsecond=0)
     add_hours = (2 - (now.hour % 2)) % 2
-    if add_hours == 0 and now.minute >= 7:
-        add_hours = 2
-    next_even_hour = base + timedelta(hours=add_hours)
-    sleep_seconds = (next_even_hour - now).total_seconds()
+    next_even = base + timedelta(hours=add_hours)
+
+    # 이미 실행된 시각이면 다음 짝수로 넘김
+    if last_executed_hour == now.strftime("%Y-%m-%d %H"):
+        next_even += timedelta(hours=2)
+    # minute < 7 동안 재시작된 경우엔 이번 시각 유지
+    elif now.hour % 2 == 0 and now.minute < 7:
+        next_even = base
+
+    sleep_seconds = (next_even - now).total_seconds()
     if sleep_seconds < 60:
         sleep_seconds = 60
-    print(f"🕓 다음 실행 예정: {next_even_hour.strftime('%H:%M')} (대기 {int(sleep_seconds/60)}분)")
+    print(f"🕓 다음 실행 예정: {next_even.strftime('%H:%M')} (대기 {int(sleep_seconds/60)}분)")
     time.sleep(sleep_seconds)
 
 # ─────────────────────────────────────────────
@@ -325,7 +329,7 @@ if __name__ == "__main__":
     ensure_persistent_files()
     print("🚀 fcanews bot 시작 (Render 상시 루프 모드)")
 
-    last_executed_hour = None  # 중복 실행 방지용 시각 저장
+    last_executed_hour = None
 
     try:
         while True:
@@ -341,7 +345,7 @@ if __name__ == "__main__":
             else:
                 print(f"⏳ 대기 중... 현재 {current.strftime('%H:%M')}")
 
-            wait_until_next_even_hour()
+            wait_until_next_even_hour(last_executed_hour)
 
     except KeyboardInterrupt:
         print("🛑 종료 신호 감지 - 종료 중")

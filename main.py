@@ -206,25 +206,23 @@ def run_bot():
         search_keywords, filter_keywords, sent_before
     )
 
-    should_send = is_force_cycle or len(found) >= MIN_SEND_THRESHOLD
+    should_send = is_force_cycle or (len(found) >= MIN_SEND_THRESHOLD and hour % 2 == 0)
 
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "\n".join(lines)
         send_to_telegram(message)
         sent_count = len(found)
-    # elif not found:
-        # send_to_telegram("🔎 새 뉴스가 없습니다!")
-        # sent_count = 0
     else:
         sent_count = 0
+        print("⏸️ 보류 상태 - 발송 없음")
 
     if should_send and found:
         for _, link in found:
             sent_before.add(link)
         save_sent_log(sent_before)
     else:
-        print("⏸️ 보류 상태 - sent_log.json 갱신 안 함")
+        print("⏸️ sent_log.json 갱신 안 함")
 
     call_count, total_articles = load_call_count()
     call_count += 1
@@ -256,17 +254,25 @@ def wait_until_next_even_hour():
     time.sleep(sleep_seconds)
 
 # ─────────────────────────────────────────────
-# Render 루프
+# Render 루프 (배포 직후 발송 방지)
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():
         exit(0)
 
-    print("🚀 fcanews bot (Render 크론형 정시 실행) 시작")
+    print("🚀 fcanews bot 시작 (Render 상시 루프 모드)")
+    now = datetime.now(KST)
+    next_even_hour = (now.replace(minute=0, second=0, microsecond=0)
+                      + timedelta(hours=2 - (now.hour % 2)))
+    print(f"⏸️ 초기 기동 모드: 첫 발송은 {next_even_hour.strftime('%Y-%m-%d %H:%M:%S')} 예정")
 
     try:
         while True:
-            run_bot()
+            current = datetime.now(KST)
+            if current.hour % 2 == 0 and current.minute < 7:
+                run_bot()
+            else:
+                print(f"⏳ 대기 중... 현재 {current.strftime('%H:%M')} (짝수시 아님)")
             wait_until_next_even_hour()
     except KeyboardInterrupt:
         print("🛑 종료 신호 감지 - 종료 중")

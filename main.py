@@ -44,7 +44,7 @@ LOCK_FILE = "/tmp/fcanews.lock"
 # ─────────────────────────────────────────────
 # 설정값
 # ─────────────────────────────────────────────
-DISPLAY_PER_CALL = 100
+DISPLAY_PER_CALL = 30
 MAX_LOOPS = 5
 REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 3

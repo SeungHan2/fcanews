@@ -1,7 +1,7 @@
 # test_run.py
 import os
 from datetime import datetime
-from fcanews_main_fixed_v2 import run_bot, send_to_telegram, ADMIN_CHAT_ID
+from main import run_bot, send_to_telegram, ADMIN_CHAT_ID
 
 # 테스트 모드 설정
 os.environ["TEST_MODE"] = "True"

@@ -289,7 +289,7 @@ def run_bot():
         f"- 키워드 호출 : <b>{total_fetched}</b>건 ({api_calls}회)\n"
         f"- 제목으로 필터링 후 : <b>{total_title_filtered}</b>건 (합계)\n"
         f"- 중복 필터링 후 : <b>{sent_count}</b>건 (=최종 발송)\n"
-        f"- 이전 발송 기사 감지 : <b>{'SUCCESS' if detected_prev else 'FAIL'}</b>\n"
+        f"- 이전 발송 기사 감지 : <b>{'✅ SUCCESS' if detected_prev else '⚠️ FAIL'}</b>\n"
         f"- 호출 상세:\n" + "\n".join(
             [f"  • {r['call_no']}회차: {r['fetched']}건 / 제목 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
              for r in loop_reports]

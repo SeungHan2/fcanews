@@ -39,6 +39,7 @@ UA = "Mozilla/5.0 (compatible; fcanewsbot/2.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
 FORCE_HOURS = {0, 6, 12, 18}
 
+
 def already_running():
     try:
         if os.path.exists(LOCK_FILE):
@@ -53,6 +54,7 @@ def already_running():
         print("⚠️ 락 파일 처리 중 예외:", e)
         return False
 
+
 def clear_lock():
     try:
         if os.path.exists(LOCK_FILE):
@@ -61,8 +63,10 @@ def clear_lock():
     except Exception as e:
         print("⚠️ 락 파일 제거 예외:", e)
 
+
 def _current_hour_str():
     return datetime.now(KST).strftime("%Y-%m-%d %H:00")
+
 
 def already_sent_this_hour():
     try:
@@ -74,12 +78,14 @@ def already_sent_this_hour():
     except Exception:
         return False
 
+
 def mark_sent_now():
     try:
         with open(LAST_SENT_TIME_FILE, "w", encoding="utf-8") as f:
             f.write(_current_hour_str())
     except Exception as e:
         print("⚠️ 발송 시각 기록 예외:", e)
+
 
 def ensure_persistent_files():
     if not os.path.exists(SENT_LOG_PATH):
@@ -113,6 +119,7 @@ def save_sent_log(sent_ids):
             json.dump(sent_list, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("⚠️ sent_log 저장 예외:", e)
+
 
 def search_recent_news(search_keywords, filter_keywords, sent_before):
     base_url = "https://openapi.naver.com/v1/search/news.json"
@@ -181,10 +188,11 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
 
         start += DISPLAY_PER_CALL
 
-    latest_time = max(pub_times).strftime("%m-%d %H:%M") if pub_times else "N/A"
-    earliest_time = min(pub_times).strftime("%m-%d %H:%M") if pub_times else "N/A"
+    latest_time = max(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
+    earliest_time = min(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
 
     return collected, loop_reports, total_fetched, latest_time, earliest_time, detected_prev
+
 
 def send_to_telegram(message, chat_id=None):
     chat_id = chat_id or TELEGRAM_CHAT_ID
@@ -210,6 +218,7 @@ def send_to_telegram(message, chat_id=None):
         print("❌ 텔레그램 전송 예외:", e)
         return False
 
+
 def run_bot():
     now = datetime.now(KST)
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
@@ -229,9 +238,9 @@ def run_bot():
     total_title_filtered = sum(r["title_filtered"] for r in loop_reports)
     api_calls = len(loop_reports)
     sent_count = len(found)
-
     should_send = sent_count >= MIN_SEND_THRESHOLD
 
+    # ✅ 기사 발송
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "\n".join(lines)
@@ -242,18 +251,30 @@ def run_bot():
             save_sent_log(sent_before)
             mark_sent_now()
 
-    report = (
-        f"📊 {now.strftime('%H:%M:%S KST')} 기준\n"
-        f"- {'✅ 발송' if should_send else '⏸️ 보류'}\n"
-        f"- 키워드 호출 : <b>{total_fetched}</b>건 ({api_calls}회)\n"
-        f"- 제목으로 필터링 후 : <b>{total_title_filtered}</b>건 (합계)\n"
-        f"- 중복 필터링 후 : <b>{sent_count}</b>건 (=최종 발송)\n"
-        f"- 이전 발송 기사 감지 : <b>{'✅ SUCCESS' if detected_prev else '⚠️ FAIL'}</b>\n"
-        f"- 기사시간: {latest_time} ~ {earliest_time}"
-    )
+    # ✅ 관리자 리포트 생성 (새 형식)
+    report_lines = [f"📊 {now.strftime('%H:%M:%S KST')} 기준"]
+
+    if should_send:
+        report_lines.append(f"✅ 발송({sent_count}건)")
+    else:
+        report_lines.append(f"⏸️ 보류({sent_count}건)")
+
+    for r in loop_reports:
+        line = (
+            f"- {r['call_no']}차 통과 {r['title_filtered'] - r['duplicate_filtered']}건 : "
+            f"{r['fetched']}호출 / 제목필터 통과 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
+        )
+        if r["call_no"] == len(loop_reports) and detected_prev:
+            line += " ✅SUCCESS"
+        report_lines.append(line)
+
+    report_lines.append(f"- 호출 : {latest_time} ~ {earliest_time}")
+
+    report = "\n".join(report_lines)
 
     send_to_telegram(report, chat_id=ADMIN_CHAT_ID)
     print(f"✅ 처리 완료 ({sent_count}건)")
+
 
 def wait_until_next_even_hour(last_executed_hour):
     now = datetime.now(KST)
@@ -273,6 +294,7 @@ def wait_until_next_even_hour(last_executed_hour):
         sleep_seconds = 60
     print(f"🕓 다음 실행 예정: {next_even.strftime('%H:%M')} (대기 {int(sleep_seconds/60)}분)")
     time.sleep(sleep_seconds)
+
 
 if __name__ == "__main__":
     if already_running():

@@ -269,7 +269,7 @@ def run_bot():
             f"호출 {r['fetched']} / 제목필터 통과 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
         )
         if r["call_no"] == len(loop_reports):
-            line += " (✅OK)"
+            line += " (OK)"
         report_lines.append(line)
 
     report_lines.append(f"호출 : {latest_time} ~ {earliest_time}")

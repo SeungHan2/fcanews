@@ -223,6 +223,9 @@ def run_bot():
     now = datetime.now(KST)
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
 
+    # ✅ 테스트 모드 감지
+    TEST_MODE = os.getenv("TEST_MODE") == "True"
+
     if already_sent_this_hour():
         print("⏹️ 이미 이번 시각에 발송 완료 → 중복 방지")
         return
@@ -244,12 +247,16 @@ def run_bot():
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "\n".join(lines)
-        ok = send_to_telegram(message)
-        if ok:
-            for _, link in found:
-                sent_before.add(link)
-            save_sent_log(sent_before)
-            mark_sent_now()
+
+        if TEST_MODE:
+            print("🧪 테스트 모드: 본채널 발송 스킵, 관리자 리포트만 전송")
+        else:
+            ok = send_to_telegram(message)
+            if ok:
+                for _, link in found:
+                    sent_before.add(link)
+                save_sent_log(sent_before)
+                mark_sent_now()
 
     # ✅ 관리자 리포트 생성 (새 형식)
     report_lines = [f"📊 {now.strftime('%H:%M:%S KST')} 기준"]

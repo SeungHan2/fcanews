@@ -1,7 +1,7 @@
 # test_run.py
 import os
 from datetime import datetime, timedelta, timezone
-from main import run_bot, send_to_telegram, ADMIN_CHAT_ID
+from main import run_bot, send_to_telegram, ADMIN_CHAT_ID, LAST_SENT_TIME_FILE
 
 # ─────────────────────────────────────────────
 # 한국시간 (KST) 설정
@@ -10,6 +10,10 @@ KST = timezone(timedelta(hours=9))
 
 # 테스트 모드 강제 활성화
 os.environ["TEST_MODE"] = "True"
+
+# 테스트용: 중복 방지 해제
+if os.path.exists(LAST_SENT_TIME_FILE):
+    os.remove(LAST_SENT_TIME_FILE)
 
 # 관리자에게 시작 알림
 now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")

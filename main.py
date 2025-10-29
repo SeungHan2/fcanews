@@ -223,7 +223,6 @@ def run_bot():
     now = datetime.now(KST)
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
 
-    # ✅ 테스트 모드 감지
     TEST_MODE = os.getenv("TEST_MODE") == "True"
 
     if already_sent_this_hour():
@@ -243,7 +242,6 @@ def run_bot():
     sent_count = len(found)
     should_send = sent_count >= MIN_SEND_THRESHOLD
 
-    # ✅ 기사 발송
     if should_send and found:
         lines = [f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)]
         message = "\n".join(lines)
@@ -258,25 +256,23 @@ def run_bot():
                 save_sent_log(sent_before)
                 mark_sent_now()
 
-    # ✅ 관리자 리포트 생성 (새 형식)
-    report_lines = [f"📊 {now.strftime('%H:%M:%S KST')} 기준"]
-
+    # ✅ 관리자 리포트 (새 형식)
+    report_lines = []
     if should_send:
-        report_lines.append(f"✅ 발송({sent_count}건)")
+        report_lines.append(f"✅ 발송 [{sent_count}건] ({now.strftime('%H:%M:%S KST')} 기준)")
     else:
-        report_lines.append(f"⏸️ 보류({sent_count}건)")
+        report_lines.append(f"⏸️ 보류 [{sent_count}건] ({now.strftime('%H:%M:%S KST')} 기준)")
 
     for r in loop_reports:
         line = (
-            f"- {r['call_no']}차 통과 {r['title_filtered'] - r['duplicate_filtered']}건 : "
+            f"{r['call_no']}차 통과 [{r['title_filtered'] - r['duplicate_filtered']}건] : "
             f"호출 {r['fetched']} / 제목필터 통과 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
         )
-        if r["call_no"] == len(loop_reports) and detected_prev:
-            line += " ✅SUCCESS"
+        if r["call_no"] == len(loop_reports):
+            line += " (✅OK)"
         report_lines.append(line)
 
-    report_lines.append(f"- 호출 : {latest_time} ~ {earliest_time}")
-
+    report_lines.append(f"호출 : {latest_time} ~ {earliest_time}")
     report = "\n".join(report_lines)
 
     send_to_telegram(report, chat_id=ADMIN_CHAT_ID)

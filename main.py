@@ -269,7 +269,7 @@ def run_bot():
     for r in loop_reports:
         line = (
             f"- {r['call_no']}차 통과 {r['title_filtered'] - r['duplicate_filtered']}건 : "
-            f"{r['fetched']}호출 / 제목필터 통과 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
+            f"호출 {r['fetched']} / 제목필터 통과 {r['title_filtered']} / 중복 {r['duplicate_filtered']}"
         )
         if r["call_no"] == len(loop_reports) and detected_prev:
             line += " ✅SUCCESS"

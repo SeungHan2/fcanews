@@ -272,7 +272,7 @@ def run_bot():
             line += " (OK)"
         report_lines.append(line)
 
-    report_lines.append(f"::: {latest_time} ~ {earliest_time} :::")
+    report_lines.append(f"【{latest_time} ~ {earliest_time}】")
     report = "\n".join(report_lines)
 
     send_to_telegram(report, chat_id=ADMIN_CHAT_ID)

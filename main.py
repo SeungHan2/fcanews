@@ -266,13 +266,13 @@ def run_bot():
     for r in loop_reports:
         line = (
             f"{r['call_no']}차({r['title_filtered'] - r['duplicate_filtered']}건) : "
-            f"호출 {r['fetched']} → 제목 통과 {r['title_filtered']}(−중복 {r['duplicate_filtered']})"
+            f"호출 {r['fetched']} → 제목 통과 {r['title_filtered']} (−{r['duplicate_filtered']} 중복)"
         )
         if r["call_no"] == len(loop_reports):
             line += " (OK)"
         report_lines.append(line)
 
-    report_lines.append(f"호출 {latest_time} ~ {earliest_time}")
+    report_lines.append(f"::: {latest_time} ~ {earliest_time} :::")
     report = "\n".join(report_lines)
 
     send_to_telegram(report, chat_id=ADMIN_CHAT_ID)

@@ -8,6 +8,8 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+import re
+from urllib.parse import urlparse, parse_qs, unquote
 
 # ─────────────────────────────────────────────
 # 표준 출력 버퍼링 해제 (Render 실시간 로그용)
@@ -135,6 +137,32 @@ def save_sent_log(sent_ids):
         print("⚠️ sent_log 저장 예외:", e)
 
 # ─────────────────────────────────────────────
+# 링크 정규화 (중복 방지 강화)
+# ─────────────────────────────────────────────
+def normalize_link(link: str) -> str:
+    """링크를 정규화하여 중복 감지 정확도 향상"""
+    if not link:
+        return ""
+    link = link.strip()
+    link = link.replace("http://", "https://")
+    link = link.replace("https://www.", "https://")
+    link = unquote(link)  # 퍼센트 인코딩 제거
+
+    # hansbiz 등 idxno 기반 기사
+    qs = parse_qs(urlparse(link).query)
+    if "idxno" in qs:
+        return f"hansbiz_{qs['idxno'][0]}"
+
+    # 네이버 뉴스 (mobile / desktop 버전 통합)
+    m = re.search(r"(?:article/|aid=)(\d{9,})", link)
+    if m:
+        return f"naver_{m.group(1)}"
+
+    # 불필요한 파라미터 제거
+    base = link.split("?")[0].rstrip("/")
+    return base
+
+# ─────────────────────────────────────────────
 # 뉴스 검색
 # ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords, sent_before):
@@ -176,6 +204,8 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
             title_clean = title_raw.replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
             pub_raw = item.get("pubDate")
+
+            norm_link = normalize_link(link)
             if pub_raw:
                 try:
                     pub_dt = parsedate_to_datetime(pub_raw).astimezone(KST)
@@ -185,11 +215,12 @@ def search_recent_news(search_keywords, filter_keywords, sent_before):
 
             if any(k.lower() in title_clean.lower() for k in filter_keywords):
                 title_filtered += 1
-                if link in sent_before:
+                if norm_link in sent_before:
                     duplicate_filtered += 1
                     detected_prev = True
                 else:
                     collected.append((title_clean, link))
+                    sent_before.add(norm_link)
 
         loop_reports.append({
             "call_no": loop_count,
@@ -261,7 +292,6 @@ def run_bot():
     total_title_filtered = sum(r["title_filtered"] for r in loop_reports)
     sent_count = len(found)
 
-    # 💡 발송 조건: 강제 시각(0,6,12,18)은 1건 이상 / 그 외는 3건 이상
     if current_hour in FORCE_HOURS:
         should_send = sent_count >= 1
         print(f"🕕 강제 발송 시각({current_hour}시) 감지 → 1건 이상이면 발송")
@@ -277,14 +307,9 @@ def run_bot():
         else:
             ok = send_to_telegram(message)
             if ok:
-                for _, link in found:
-                    sent_before.add(link)
                 save_sent_log(sent_before)
                 mark_sent_now()
 
-    # ─────────────────────────────────────────────
-    # 관리자 리포트
-    # ─────────────────────────────────────────────
     report_lines = []
     if should_send:
         report_lines.append(f"✅ 발송 [{sent_count}건] ({now.strftime('%H:%M:%S KST')} 기준)")

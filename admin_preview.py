@@ -50,7 +50,7 @@ report = (
 
 if sent_count > 0:
     report += "📰 <b>발송 후보 기사 목록</b>\n" + "\n".join(
-        [f"• <a href='{a['link']}'>{html.escape(a['title'])}</a>" for a in found]
+        [f"• <a href='{link}'>{html.escape(title)}</a>" for title, link in found]
     )
 else:
     report += "✅ 발송 후보 없음"

@@ -216,13 +216,29 @@ def run_bot():
     else:
         print("⏸️ 본채널 발송 조건 미충족 → 관리자 리포트만 발송")
 
+# ─────────────────────────────────────────────
+# 관리자 메시지 포맷 (요청 버전)
+# ─────────────────────────────────────────────
     report = []
-    report.append(f"📊 관리자 리포트 ({now.strftime('%H:%M:%S KST')})")
+    
+    # 1️⃣ 헤더 줄
+    status_icon = "✅" if should_send and found else "⏸️"
+    status_text = "발송" if should_send and found else "보류"
+    report.append(f"{status_icon} <b>{status_text}</b> [<b>{sent_count}</b>건] ({now.strftime('%H:%M:%S KST')} 기준)")
+    
+    # 2️⃣ 루프별 통계
     for r in loop_reports:
-        report.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
-    report.append(f"(제목 통과) 발송 {sent_count} / 최신 {total_time_filtered}")
-    report.append(f"【{latest_time} ~ {earliest_time}】")
+        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
+    
+    # 3️⃣ 제목 통과 통계
+    report.append(f"제목통과 <b>{sent_count}</b> / (최신<b>{total_time_filtered}</b>)")
+    
+    # 4️⃣ 최신 기사 시간 범위
+    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
+    
+    # 5️⃣ 전송
     send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
+
 
 # ─────────────────────────────────────────────
 # 실행 엔트리

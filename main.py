@@ -234,17 +234,49 @@ def run_bot():
     send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
 
 # ─────────────────────────────────────────────
-# 실행 엔트리 (정시 2시간 단위)
+# 실행 엔트리 (정시 2시간 단위 / 중복 방지 추가)
 # ─────────────────────────────────────────────
+LAST_SENT_TIME_FILE = os.path.join(PERSISTENT_MOUNT, "last_sent_time.txt")
+
+def already_sent_recently(minutes=30):
+    """최근 minutes분 내 발송 기록이 있으면 True"""
+    if not os.path.exists(LAST_SENT_TIME_FILE):
+        return False
+    try:
+        with open(LAST_SENT_TIME_FILE, "r", encoding="utf-8") as f:
+            ts = float(f.read().strip())
+        last = datetime.fromtimestamp(ts, tz=KST)
+        diff = datetime.now(KST) - last
+        if diff.total_seconds() < minutes * 60:
+            print(f"⏹️ {int(diff.total_seconds())}초 전 발송 기록 → 중복 방지로 종료")
+            return True
+    except Exception as e:
+        print("⚠️ 발송 시간 기록 확인 예외:", e)
+    return False
+
+def mark_sent_now():
+    """현재 시각을 마지막 발송 시각으로 기록"""
+    try:
+        with open(LAST_SENT_TIME_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        print("⚠️ 발송 시간 기록 예외:", e)
+
+
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
 
     print("🚀 fcanews bot 시작 (정시 2시간 간격 / 하루4회 강제발송)")
 
+    # ✅ 중복 방지: 30분 내에 실행 기록이 있으면 종료
+    if already_sent_recently(30):
+        sys.exit(0)
+
     now = datetime.now(KST)
     if now.hour % 2 == 0:
         run_bot()
+        mark_sent_now()  # ✅ 발송 시각 기록
     else:
         print("⏸️ 비정시 시간 → 종료")
 
@@ -252,3 +284,4 @@ if __name__ == "__main__":
     print("✅ 작업 종료 (Render suspend 대기)")
     time.sleep(5)
     sys.exit(0)
+

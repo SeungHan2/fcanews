@@ -1,63 +1,58 @@
-# admin_preview.py
+import os
 import html
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from main import (
     load_keywords,
-    load_sent_log,
     search_recent_news,
     send_to_telegram,
     ADMIN_CHAT_ID,
+    KST,
 )
 
-# ───────────────────────────────
-# 한국시간 (KST) 설정
-# ───────────────────────────────
-KST = timezone(timedelta(hours=9))
-now = datetime.now(KST)
-print(f"🕒 {now.strftime('%Y-%m-%d %H:%M:%S')} KST | 관리자 미리보기 시작")
+# ─────────────────────────────────────────────
+# 관리자 미리보기 시작
+# ─────────────────────────────────────────────
+print(f"🕒 {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} KST | 관리자 미리보기 시작")
 
-# ───────────────────────────────
-# 키워드/로그 로드
-# ───────────────────────────────
-search_keywords = load_keywords("search_keywords.txt")
-filter_keywords = load_keywords("filter_keywords.txt")
-sent_before = load_sent_log()
+try:
+    # 1️⃣ 키워드 불러오기
+    search_keywords = load_keywords("search_keywords.txt")
+    filter_keywords = load_keywords("filter_keywords.txt")
 
-# ───────────────────────────────
-# 뉴스 검색 실행
-# ───────────────────────────────
-found, loop_reports, total_fetched, latest_time, earliest_time, detected_prev = search_recent_news(
-    search_keywords, filter_keywords, sent_before
-)
-
-# ───────────────────────────────
-# 리포트 요약 생성
-# ───────────────────────────────
-total_title_filtered = sum(r["title_filtered"] for r in loop_reports)
-total_dup_filtered = sum(r["duplicate_filtered"] for r in loop_reports)
-api_calls = len(loop_reports)
-sent_count = len(found)
-
-report = (
-    f"🧪 <b>관리자 미리보기</b>\n"
-    f"📊 {now.strftime('%H:%M:%S')} KST 기준\n"
-    f"- 키워드 호출 : {total_fetched}건 ({api_calls}회)\n"
-    f"- 중복 제외 : {total_dup_filtered}건\n"
-    f"- 제목 필터 제외 : {total_title_filtered}건\n"
-    f"- 최종 발송 후보 : {sent_count}건\n"
-    f"- 기사 시간 범위 : {latest_time} ~ {earliest_time}\n\n"
-)
-
-if sent_count > 0:
-    report += "📰 <b>발송 후보 기사 목록</b>\n" + "\n".join(
-        [f"• <a href='{link}'>{html.escape(title)}</a>" for title, link in found]
+    # 2️⃣ 뉴스 검색 (시간 필터 + 제목 필터)
+    found, loop_reports, latest_time, earliest_time, pub_times = search_recent_news(
+        search_keywords, filter_keywords
     )
-else:
-    report += "✅ 발송 후보 없음"
 
-# ───────────────────────────────
-# 관리자 계정으로 전송 (본 채널로는 X)
-# ───────────────────────────────
-send_to_telegram(report, ADMIN_CHAT_ID)
+    sent_count = len(found)
+    total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
 
-print("✅ 관리자 계정으로 미리보기 리포트 전송 완료 (본 채널 발송 없음)")
+    # 3️⃣ 관리자 리포트 생성
+    report_lines = []
+    report_lines.append(f"🧪 <b>관리자 미리보기</b>")
+    report_lines.append(f"🕓 기준 시각: {datetime.now(KST).strftime('%m-%d %H:%M:%S')}")
+    report_lines.append(f"🔹 시간 필터 통과: {total_time_filtered}건")
+    report_lines.append(f"🔹 제목 필터 통과: {sent_count}건\n")
+
+    for r in loop_reports:
+        report_lines.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
+
+    report_lines.append(f"(제목 통과) 발송 {sent_count} / 최신 {total_time_filtered}")
+    report_lines.append(f"【{latest_time} ~ {earliest_time}】")  # ← 시간 필터 통과 기사들의 범위
+
+    # 4️⃣ 기사 미리보기 (최대 10개)
+    if found:
+        preview_lines = [
+            f"• <a href='{l}'>{html.escape(t)}</a>"
+            for t, l in found[:10]
+        ]
+        report_lines.append("\n".join(preview_lines))
+    else:
+        report_lines.append("⚠️ 현재 발송 후보 기사 없음")
+
+    # 5️⃣ 관리자 채널로 전송
+    send_to_telegram("\n".join(report_lines), chat_id=ADMIN_CHAT_ID)
+    print("✅ 관리자 미리보기 전송 완료")
+
+except Exception as e:
+    print("❌ 관리자 미리보기 중 예외 발생:", e)

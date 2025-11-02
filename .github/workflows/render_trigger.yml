@@ -1,9 +1,10 @@
-name: Run fcanews 3min before every even hour (KST)
+name: Run fcanews 5min before every even hour (KST)
 
 on:
   schedule:
-    # UTC 기준 (KST -9시간) → KST 짝수시 정시 3분 전
-    - cron: "57 14,16,18,20,22,0,2,4,6,8,10,12 * * *"
+    # UTC 기준 (KST -9시간)
+    # KST 짝수시 정시 5분 전 → 예: 00:55, 02:55, 04:55 ...
+    - cron: "55 14,16,18,20,22,0,2,4,6,8,10,12 * * *"
   workflow_dispatch:
 
 jobs:
@@ -16,12 +17,12 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" || true
 
       - name: Wait for warmup
-        run: sleep 60  # Render 부팅 시간 확보
+        run: sleep 60  # Render 부팅 시간 확보 (1분)
 
-      - name: Keep alive for 6 minutes (정시 이후 +3분까지)
-        run: sleep 360
+      - name: Keep alive for 6 minutes (정시 이후 +1분까지)
+        run: sleep 360  # 총 6분 유지 (정시 -5분 ~ 정시 +1분)
 
-      - name: Suspend instance (정시+3분 시점)
+      - name: Suspend instance (정시+1분 시점)
         run: |
           curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/suspend" \
             -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}"

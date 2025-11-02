@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews Final Version (Render 재시작 방지)
+# main.py — fcanews Final Version (정시 5분 로직 / Render 재시작 방지)
 # ===============================================
 import os
 import sys
@@ -41,10 +41,6 @@ MIN_SEND_THRESHOLD = 3
 UA = "Mozilla/5.0 (compatible; fcanewsbot/3.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
 FORCE_HOURS = {0, 6, 12, 18}
-
-# 실행 허용 구간 설정
-WAIT_BEFORE_SEC = 0   # 정시 전 대기 (초)
-WAIT_AFTER_MIN = 3    # 정시 이후 허용 분
 
 # ─────────────────────────────────────────────
 # 락 파일 관리
@@ -192,12 +188,6 @@ def run_bot():
     current_hour = now.hour
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
 
-    # 실행 시각 검사
-    if not (current_hour % 2 == 0 and 0 <= now.minute <= WAIT_AFTER_MIN):
-        print("⏸️ 비정시 실행 → 관리자 리포트만 발송")
-        send_to_telegram(f"⚙️ 비정시 실행 감지 ({now.strftime('%H:%M')})", chat_id=ADMIN_CHAT_ID)
-        return
-
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
     found, loop_reports, latest_time, earliest_time, pub_times = search_recent_news(search_keywords, filter_keywords)
@@ -205,6 +195,16 @@ def run_bot():
     sent_count = len(found)
     total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
     should_send = (sent_count >= 1 if current_hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
+
+    # ─ 관리자 메시지 포맷 ─
+    report = []
+    status_icon = "✅" if should_send and found else "⏸️"
+    status_text = "발송" if should_send and found else "보류"
+    report.append(f"{status_icon} <b>{status_text}</b> [<b>{sent_count}</b>건] ({now.strftime('%H:%M:%S KST')} 기준)")
+    for r in loop_reports:
+        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
+    report.append(f"(제목통과) <b>{sent_count}</b> / 최신<b>{total_time_filtered}</b>")
+    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
 
     if should_send and found:
         message = "\n".join([f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)])
@@ -216,29 +216,7 @@ def run_bot():
     else:
         print("⏸️ 본채널 발송 조건 미충족 → 관리자 리포트만 발송")
 
-# ─────────────────────────────────────────────
-# 관리자 메시지 포맷 (요청 버전)
-# ─────────────────────────────────────────────
-    report = []
-    
-    # 1️⃣ 헤더 줄
-    status_icon = "✅" if should_send and found else "⏸️"
-    status_text = "발송" if should_send and found else "보류"
-    report.append(f"{status_icon} <b>{status_text}</b> [<b>{sent_count}</b>건] ({now.strftime('%H:%M:%S KST')} 기준)")
-    
-    # 2️⃣ 루프별 통계
-    for r in loop_reports:
-        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
-    
-    # 3️⃣ 제목 통과 통계
-    report.append(f"제목통과 <b>{sent_count}</b> / (최신<b>{total_time_filtered}</b>)")
-    
-    # 4️⃣ 최신 기사 시간 범위
-    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
-    
-    # 5️⃣ 전송
     send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
-
 
 # ─────────────────────────────────────────────
 # 실행 엔트리
@@ -246,15 +224,29 @@ def run_bot():
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
-    print("🚀 fcanews bot 시작 (정시±3분 제어 / Render 재시작 방지)")
+    print("🚀 fcanews bot 시작 (정시 5분 로직 / Render 재시작 방지)")
+
+    TEST_MODE = os.getenv("TEST_MODE") == "True"
+    FORCE_SEND = os.getenv("FORCE_SEND") == "True"
+
+    now = datetime.now(KST)
+    next_hour = now.hour + (1 if now.hour % 2 == 1 else 0)
+    target_time = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    wait_seconds = (target_time - now).total_seconds()
+
+    if not (TEST_MODE or FORCE_SEND):
+        if 0 < wait_seconds <= 300:
+            print(f"⏰ 정시({target_time.strftime('%H:%M:%S')})까지 {int(wait_seconds)}초 대기 중...")
+            time.sleep(wait_seconds)
+        elif wait_seconds > 300:
+            print(f"💤 정시까지 {int(wait_seconds/60)}분 남음 → Render 유지 모드 진입")
+    else:
+        print("🧪 테스트 또는 강제 발송 모드 → 대기 로직 생략")
 
     run_bot()
     clear_lock()
     print("✅ 작업 종료 (Render suspend 대기)")
 
-    # ─────────────────────────────────────────────
-    # Render 자동 재시작 방지: 프로세스를 유지
-    # ─────────────────────────────────────────────
     while True:
         now = datetime.now(KST)
         print(f"⏳ Render 유지 중... ({now.strftime('%H:%M:%S')})")

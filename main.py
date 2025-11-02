@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews 자동 발송 전용 (짝수시 정시 계산 완전 교정 / Render 재시작 방지)
+# main.py — fcanews 자동 발송 (정시 보장 / 2시간 간격 / 4회 강제발송)
 # ===============================================
 import os
 import sys
@@ -186,7 +186,7 @@ def search_recent_news(search_keywords, filter_keywords):
 def run_bot():
     now = datetime.now(KST)
     current_hour = now.hour
-    print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
+    print(f"\n🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST 실행 시작")
 
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
@@ -196,7 +196,6 @@ def run_bot():
     total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
     should_send = (sent_count >= 1 if current_hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
 
-    # 관리자 리포트
     report = []
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
@@ -217,48 +216,43 @@ def run_bot():
         print("⏸️ 본채널 발송 조건 미충족 → 관리자 리포트만 발송")
 
     send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
+    print("✅ 관리자 리포트 전송 완료")
 
 # ─────────────────────────────────────────────
-# 실행 엔트리
+# 2시간마다 정시 실행 루프
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
-    print("🚀 fcanews bot 시작 (짝수시 정시 교정 / Render 재시작 방지)")
 
-    now = datetime.now(KST)
-    hour = now.hour
-
-    # 🧭 정확한 짝수시 정시 계산
-    if hour % 2 == 0:
-        if now.minute >= 5:
-            target_hour = hour + 2
-        else:
-            target_hour = hour
-    else:
-        target_hour = hour + 1
-
-    if target_hour >= 24:
-        target_hour -= 24
-        target_day = now + timedelta(days=1)
-    else:
-        target_day = now
-
-    target_time = target_day.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-    wait_seconds = (target_time - now).total_seconds()
-
-    if 0 < wait_seconds <= 300:
-        print(f"⏰ 다음 짝수시 정시({target_time.strftime('%H:%M:%S')})까지 {int(wait_seconds)}초 대기 중...")
-        time.sleep(wait_seconds)
-        run_bot()
-    elif wait_seconds > 300:
-        print(f"💤 다음 짝수시 정시까지 {int(wait_seconds/60)}분 남음 → Render 유지 모드 진입")
-
-    clear_lock()
-    print("✅ 작업 종료 (Render suspend 대기)")
-
-    # Render 자동 재시작 방지용 루프
+    print("🚀 fcanews bot 시작 (정시 보장 / 2시간 간격 루프)")
     while True:
-        now = datetime.now(KST)
-        print(f"⏳ Render 유지 중... ({now.strftime('%H:%M:%S')})")
-        time.sleep(60)
+        try:
+            now = datetime.now(KST)
+            # 현재 시각에서 다음 짝수시(정시) 계산
+            next_hour = (now.hour + 1) // 2 * 2
+            if now.hour % 2 == 0 and now.minute < 5:
+                next_hour = now.hour  # 정시 직후면 바로 실행
+            if next_hour >= 24:
+                next_hour -= 24
+                next_day = now + timedelta(days=1)
+            else:
+                next_day = now
+
+            target_time = next_day.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+            wait_seconds = (target_time - now).total_seconds()
+
+            if wait_seconds > 0:
+                print(f"⏰ 다음 실행 시각: {target_time.strftime('%Y-%m-%d %H:%M:%S')} KST ({int(wait_seconds/60)}분 후)")
+                time.sleep(wait_seconds)
+
+            run_bot()
+
+        except Exception as e:
+            print("❌ 루프 예외 발생:", e)
+            time.sleep(60)
+
+        finally:
+            clear_lock()
+            # 다음 정시까지 다시 루프 반복
+            time.sleep(10)

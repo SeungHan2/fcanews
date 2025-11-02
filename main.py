@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews 자동 발송 전용 (짝수시 정시 5분 로직 / Render 재시작 방지)
+# main.py — fcanews 자동 발송 전용 (짝수시 정시 계산 완전 교정 / Render 재시작 방지)
 # ===============================================
 import os
 import sys
@@ -224,20 +224,27 @@ def run_bot():
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
-    print("🚀 fcanews bot 시작 (짝수시 정시 5분 로직 / Render 재시작 방지)")
+    print("🚀 fcanews bot 시작 (짝수시 정시 교정 / Render 재시작 방지)")
 
     now = datetime.now(KST)
     hour = now.hour
 
-    # 🧭 다음 짝수시 정시 계산
+    # 🧭 정확한 짝수시 정시 계산
     if hour % 2 == 0:
-        target_time = now.replace(minute=0, second=0, microsecond=0)
         if now.minute >= 5:
-            target_time += timedelta(hours=2)
+            target_hour = hour + 2
+        else:
+            target_hour = hour
     else:
-        target_time = now.replace(hour=hour + 1, minute=0, second=0, microsecond=0)
-        target_time += timedelta(hours=1)
+        target_hour = hour + 1
 
+    if target_hour >= 24:
+        target_hour -= 24
+        target_day = now + timedelta(days=1)
+    else:
+        target_day = now
+
+    target_time = target_day.replace(hour=target_hour, minute=0, second=0, microsecond=0)
     wait_seconds = (target_time - now).total_seconds()
 
     if 0 < wait_seconds <= 300:

@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews Final Version (2025-11)
+# main.py — fcanews Final Version (Render 재시작 방지)
 # ===============================================
 import os
 import sys
@@ -7,19 +7,9 @@ import requests
 import urllib.parse
 from dotenv import load_dotenv
 import html
-import json
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-
-# 파일 맨 위, import 바로 아래
-import time
-if os.path.exists("/tmp/already_ran"):
-    print("🛑 이미 실행됨 → 즉시 종료")
-    sys.exit(0)
-else:
-    with open("/tmp/already_ran", "w") as f:
-        f.write(str(time.time()))
 
 # ─────────────────────────────────────────────
 # 환경 / 기본 설정
@@ -50,11 +40,11 @@ REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 3
 UA = "Mozilla/5.0 (compatible; fcanewsbot/3.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
-FORCE_HOURS = {0, 6, 12, 18}  # 하루 4회 강제 발송
+FORCE_HOURS = {0, 6, 12, 18}
 
 # 실행 허용 구간 설정
-WAIT_BEFORE_SEC = 0          # 정시 전 대기 (초)
-WAIT_AFTER_MIN = 3           # 정시 이후 허용 분
+WAIT_BEFORE_SEC = 0   # 정시 전 대기 (초)
+WAIT_AFTER_MIN = 3    # 정시 이후 허용 분
 
 # ─────────────────────────────────────────────
 # 락 파일 관리
@@ -199,21 +189,14 @@ def search_recent_news(search_keywords, filter_keywords):
 # ─────────────────────────────────────────────
 def run_bot():
     now = datetime.now(KST)
-    TEST_MODE = os.getenv("TEST_MODE") == "True"
     current_hour = now.hour
     print(f"🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
 
-    # 1️⃣ 실행 시각 검사: 정시 ± WAIT_AFTER_MIN
+    # 실행 시각 검사
     if not (current_hour % 2 == 0 and 0 <= now.minute <= WAIT_AFTER_MIN):
         print("⏸️ 비정시 실행 → 관리자 리포트만 발송")
         send_to_telegram(f"⚙️ 비정시 실행 감지 ({now.strftime('%H:%M')})", chat_id=ADMIN_CHAT_ID)
         return
-
-    # 2️⃣ 정시 전이면 대기
-    if now.minute < WAIT_BEFORE_SEC / 60:
-        wait_sec = WAIT_BEFORE_SEC - now.second
-        print(f"⏰ 정시까지 {wait_sec}초 대기 중...")
-        time.sleep(wait_sec)
 
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
@@ -225,18 +208,14 @@ def run_bot():
 
     if should_send and found:
         message = "\n".join([f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)])
-        if not TEST_MODE:
-            ok = send_to_telegram(message)
-            if ok and pub_times:
-                latest_pub = max(pub_times)
-                mark_checked_time(latest_pub)
-                print(f"🕓 최신 기사 시각 갱신 완료 → {latest_pub.strftime('%Y-%m-%d %H:%M:%S')}")
-        else:
-            print("🧪 테스트 모드: 본 채널 발송 스킵")
+        ok = send_to_telegram(message)
+        if ok and pub_times:
+            latest_pub = max(pub_times)
+            mark_checked_time(latest_pub)
+            print(f"🕓 최신 기사 시각 갱신 완료 → {latest_pub.strftime('%Y-%m-%d %H:%M:%S')}")
     else:
         print("⏸️ 본채널 발송 조건 미충족 → 관리자 리포트만 발송")
 
-    # 관리자 리포트 전송
     report = []
     report.append(f"📊 관리자 리포트 ({now.strftime('%H:%M:%S KST')})")
     for r in loop_reports:
@@ -251,9 +230,16 @@ def run_bot():
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
-    print("🚀 fcanews bot 시작 (정시±3분 제어 / 본채널발송시만 시간갱신)")
+    print("🚀 fcanews bot 시작 (정시±3분 제어 / Render 재시작 방지)")
+
     run_bot()
     clear_lock()
     print("✅ 작업 종료 (Render suspend 대기)")
-    time.sleep(5)
-    sys.exit(0)
+
+    # ─────────────────────────────────────────────
+    # Render 자동 재시작 방지: 프로세스를 유지
+    # ─────────────────────────────────────────────
+    while True:
+        now = datetime.now(KST)
+        print(f"⏳ Render 유지 중... ({now.strftime('%H:%M:%S')})")
+        time.sleep(60)

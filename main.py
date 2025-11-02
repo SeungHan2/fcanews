@@ -12,6 +12,15 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
+# 파일 맨 위, import 바로 아래
+import time
+if os.path.exists("/tmp/already_ran"):
+    print("🛑 이미 실행됨 → 즉시 종료")
+    sys.exit(0)
+else:
+    with open("/tmp/already_ran", "w") as f:
+        f.write(str(time.time()))
+
 # ─────────────────────────────────────────────
 # 환경 / 기본 설정
 # ─────────────────────────────────────────────

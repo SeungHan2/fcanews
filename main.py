@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews Final Version (정시 5분 로직 / Render 재시작 방지)
+# main.py — fcanews 자동 발송 전용 (짝수시 정시 5분 로직 / Render 재시작 방지)
 # ===============================================
 import os
 import sys
@@ -196,7 +196,7 @@ def run_bot():
     total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
     should_send = (sent_count >= 1 if current_hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
 
-    # ─ 관리자 메시지 포맷 ─
+    # 관리자 리포트
     report = []
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
@@ -224,29 +224,33 @@ def run_bot():
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
-    print("🚀 fcanews bot 시작 (정시 5분 로직 / Render 재시작 방지)")
-
-    TEST_MODE = os.getenv("TEST_MODE") == "True"
-    FORCE_SEND = os.getenv("FORCE_SEND") == "True"
+    print("🚀 fcanews bot 시작 (짝수시 정시 5분 로직 / Render 재시작 방지)")
 
     now = datetime.now(KST)
-    next_hour = now.hour + (1 if now.hour % 2 == 1 else 0)
-    target_time = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    hour = now.hour
+
+    # 🧭 다음 짝수시 정시 계산
+    if hour % 2 == 0:
+        target_time = now.replace(minute=0, second=0, microsecond=0)
+        if now.minute >= 5:
+            target_time += timedelta(hours=2)
+    else:
+        target_time = now.replace(hour=hour + 1, minute=0, second=0, microsecond=0)
+        target_time += timedelta(hours=1)
+
     wait_seconds = (target_time - now).total_seconds()
 
-    if not (TEST_MODE or FORCE_SEND):
-        if 0 < wait_seconds <= 300:
-            print(f"⏰ 정시({target_time.strftime('%H:%M:%S')})까지 {int(wait_seconds)}초 대기 중...")
-            time.sleep(wait_seconds)
-        elif wait_seconds > 300:
-            print(f"💤 정시까지 {int(wait_seconds/60)}분 남음 → Render 유지 모드 진입")
-    else:
-        print("🧪 테스트 또는 강제 발송 모드 → 대기 로직 생략")
+    if 0 < wait_seconds <= 300:
+        print(f"⏰ 다음 짝수시 정시({target_time.strftime('%H:%M:%S')})까지 {int(wait_seconds)}초 대기 중...")
+        time.sleep(wait_seconds)
+        run_bot()
+    elif wait_seconds > 300:
+        print(f"💤 다음 짝수시 정시까지 {int(wait_seconds/60)}분 남음 → Render 유지 모드 진입")
 
-    run_bot()
     clear_lock()
     print("✅ 작업 종료 (Render suspend 대기)")
 
+    # Render 자동 재시작 방지용 루프
     while True:
         now = datetime.now(KST)
         print(f"⏳ Render 유지 중... ({now.strftime('%H:%M:%S')})")

@@ -29,11 +29,21 @@ try:
     now = datetime.now(KST)
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
+    
     report = []
-    report.append(f"{status_icon} <b>{status_text}</b> [{sent_count}건] ({now.strftime('%H:%M')})")
+    # 1️⃣ 1행 — 상태
+    report.append(f"{status_icon} {status_text} [<b>{len(found)}</b>건] ({now.strftime('%H:%M:%S 기준')})")
+    
+    # 2️⃣ 각 호출 결과
     for r in loop_reports:
-        report.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
-    report.append(f"(최신기사시간) {latest_time}~{earliest_time}")
+        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
+    
+    # 3️⃣ 제목통과 / 최신합계
+    report.append(f"제목통과<b>{len(found)}</b> / 최신{sum(r['time_filtered'] for r in loop_reports)}")
+    
+    # 4️⃣ 최신기사 시간
+    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
+
 
     # ✅ 전체 기사 목록 표시 (제한 없음)
     if found:

@@ -130,25 +130,38 @@ def send_to_telegram(message, chat_id=None):
         return False
 
 # ─────────────────────────────────────────────
-# 뉴스 검색
+# 뉴스 검색 (최적화 버전)
 # ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords):
+    """
+    최신 기사만 효율적으로 검색:
+    - 30건이 모두 최신 기사일 때만 다음 페이지 호출
+    - 이전 기사 등장 시 즉시 종료
+    """
     base_url = "https://openapi.naver.com/v1/search/news.json"
-    headers = {"X-Naver-Client-Id": CLIENT_ID, "X-Naver-Client-Secret": CLIENT_SECRET, "User-Agent": UA}
+    headers = {
+        "X-Naver-Client-Id": CLIENT_ID,
+        "X-Naver-Client-Secret": CLIENT_SECRET,
+        "User-Agent": UA,
+    }
 
     last_checked = get_last_checked_time()
     collected, pub_times, loop_reports = [], [], []
+    stop_due_to_old = False
 
     for loop_count in range(1, MAX_LOOPS + 1):
         query = " ".join(search_keywords)
-        url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={(loop_count-1)*DISPLAY_PER_CALL+1}&sort=date"
+        start = (loop_count - 1) * DISPLAY_PER_CALL + 1
+        url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={start}&sort=date"
+
         try:
             r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         except Exception as e:
             print("❌ 요청 예외:", e)
             break
+
         if r.status_code != 200:
-            print("❌ 요청 실패:", r.text)
+            print(f"❌ 요청 실패: {r.status_code} {r.text}")
             break
 
         items = r.json().get("items", [])
@@ -156,30 +169,51 @@ def search_recent_news(search_keywords, filter_keywords):
             break
 
         time_filtered = 0
+        new_articles = 0
+
         for item in items:
             title = html.unescape(item.get("title", "")).replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
             pub_raw = item.get("pubDate")
             if not pub_raw:
                 continue
+
             try:
                 pub_dt = parsedate_to_datetime(pub_raw).astimezone(KST)
             except Exception:
                 continue
 
+            # ✅ 시간 필터: 이전 기사 등장 시 종료 플래그
             if last_checked and pub_dt <= last_checked:
+                stop_due_to_old = True
                 continue
 
+            new_articles += 1
             pub_times.append(pub_dt)
             time_filtered += 1
+
             if not any(k.lower() in title.lower() for k in filter_keywords):
                 continue
             collected.append((title, link))
-        loop_reports.append({"call_no": loop_count, "fetched": len(items), "time_filtered": time_filtered})
+
+        loop_reports.append({
+            "call_no": loop_count,
+            "fetched": len(items),
+            "time_filtered": time_filtered,
+        })
+
+        # ✅ 루프 종료 조건
+        if stop_due_to_old:
+            print(f"⏹️ {loop_count}차에서 이전 기사 등장 → 루프 종료")
+            break
+        if new_articles < DISPLAY_PER_CALL:
+            print(f"⏹️ {loop_count}차에서 신규 기사 부족({new_articles}/{DISPLAY_PER_CALL}) → 루프 종료")
+            break
 
     latest_time = max(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
     earliest_time = min(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
     return collected, loop_reports, latest_time, earliest_time, pub_times
+
 
 # ─────────────────────────────────────────────
 # 메인 실행

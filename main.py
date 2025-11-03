@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews 자동 발송 (정시 보장 / 2시간 간격 / 4회 강제발송)
+# main.py — fcanews 자동 발송 (짝수시 정시 / /data 기록 유지 / 관리자 리포트 무제한)
 # ===============================================
 import os
 import sys
@@ -31,7 +31,8 @@ os.makedirs(PERSISTENT_MOUNT, exist_ok=True)
 
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"
-LAST_CHECKED_TIME_FILE = os.path.join(PERSISTENT_MOUNT, "last_checked_time.txt")
+LAST_SENT_FILE = os.path.join(PERSISTENT_MOUNT, "last_sent_time.txt")
+LAST_CHECKED_FILE = os.path.join(PERSISTENT_MOUNT, "last_checked_time.txt")
 LOCK_FILE = "/tmp/fcanews.lock"
 
 DISPLAY_PER_CALL = 30
@@ -59,28 +60,47 @@ def clear_lock():
     try:
         if os.path.exists(LOCK_FILE):
             os.remove(LOCK_FILE)
-            print("🧹 락 파일 제거 완료")
     except Exception as e:
         print("⚠️ 락 파일 제거 예외:", e)
 
 # ─────────────────────────────────────────────
-# 시간 기록
+# 시간 기록 (기사 기준)
 # ─────────────────────────────────────────────
 def get_last_checked_time():
-    if not os.path.exists(LAST_CHECKED_TIME_FILE):
+    if not os.path.exists(LAST_CHECKED_FILE):
         return None
     try:
-        with open(LAST_CHECKED_TIME_FILE, "r", encoding="utf-8") as f:
+        with open(LAST_CHECKED_FILE, "r") as f:
             return datetime.fromisoformat(f.read().strip())
     except Exception:
         return None
 
 def mark_checked_time(latest_pub):
     try:
-        with open(LAST_CHECKED_TIME_FILE, "w", encoding="utf-8") as f:
+        with open(LAST_CHECKED_FILE, "w") as f:
             f.write(latest_pub.isoformat())
+        print(f"🕓 최신 기사 시각 갱신: {latest_pub.strftime('%Y-%m-%d %H:%M:%S')}")
     except Exception as e:
         print("⚠️ 시간 기록 예외:", e)
+
+# ─────────────────────────────────────────────
+# 발송 기록 (중복 방지)
+# ─────────────────────────────────────────────
+def already_sent_this_hour():
+    if not os.path.exists(LAST_SENT_FILE):
+        return False
+    try:
+        with open(LAST_SENT_FILE, "r") as f:
+            last_sent = datetime.fromisoformat(f.read().strip())
+    except Exception:
+        return False
+    now = datetime.now(KST)
+    return last_sent.astimezone(KST).strftime("%Y-%m-%d %H") == now.strftime("%Y-%m-%d %H")
+
+def mark_sent_now():
+    now = datetime.now(KST)
+    with open(LAST_SENT_FILE, "w") as f:
+        f.write(now.isoformat())
 
 # ─────────────────────────────────────────────
 # 파일 로드
@@ -104,11 +124,7 @@ def send_to_telegram(message, chat_id=None):
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
         r = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT)
-        if r.status_code == 200:
-            print(f"✅ 텔레그램 전송 완료 ({chat_id})")
-            return True
-        print("❌ 텔레그램 전송 실패:", r.text)
-        return False
+        return r.status_code == 200
     except Exception as e:
         print("❌ 텔레그램 전송 예외:", e)
         return False
@@ -118,28 +134,21 @@ def send_to_telegram(message, chat_id=None):
 # ─────────────────────────────────────────────
 def search_recent_news(search_keywords, filter_keywords):
     base_url = "https://openapi.naver.com/v1/search/news.json"
-    headers = {
-        "X-Naver-Client-Id": CLIENT_ID,
-        "X-Naver-Client-Secret": CLIENT_SECRET,
-        "User-Agent": UA,
-    }
+    headers = {"X-Naver-Client-Id": CLIENT_ID, "X-Naver-Client-Secret": CLIENT_SECRET, "User-Agent": UA}
 
     last_checked = get_last_checked_time()
     collected, pub_times, loop_reports = [], [], []
-    start, loop_count, stop_due_to_time = 1, 0, False
 
-    while loop_count < MAX_LOOPS:
-        loop_count += 1
+    for loop_count in range(1, MAX_LOOPS + 1):
         query = " ".join(search_keywords)
-        url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={start}&sort=date"
-
+        url = f"{base_url}?query={urllib.parse.quote(query)}&display={DISPLAY_PER_CALL}&start={(loop_count-1)*DISPLAY_PER_CALL+1}&sort=date"
         try:
             r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         except Exception as e:
-            print(f"❌ 요청 예외: {e}")
+            print("❌ 요청 예외:", e)
             break
         if r.status_code != 200:
-            print(f"❌ 요청 실패: {r.status_code} {r.text}")
+            print("❌ 요청 실패:", r.text)
             break
 
         items = r.json().get("items", [])
@@ -148,8 +157,7 @@ def search_recent_news(search_keywords, filter_keywords):
 
         time_filtered = 0
         for item in items:
-            title_raw = html.unescape(item.get("title", ""))
-            title_clean = title_raw.replace("<b>", "").replace("</b>", "")
+            title = html.unescape(item.get("title", "")).replace("<b>", "").replace("</b>", "")
             link = (item.get("link") or "").strip()
             pub_raw = item.get("pubDate")
             if not pub_raw:
@@ -158,23 +166,16 @@ def search_recent_news(search_keywords, filter_keywords):
                 pub_dt = parsedate_to_datetime(pub_raw).astimezone(KST)
             except Exception:
                 continue
+
             if last_checked and pub_dt <= last_checked:
-                stop_due_to_time = True
                 continue
+
             pub_times.append(pub_dt)
             time_filtered += 1
-            if not any(k.lower() in title_clean.lower() for k in filter_keywords):
+            if not any(k.lower() in title.lower() for k in filter_keywords):
                 continue
-            collected.append((title_clean, link))
-
-        loop_reports.append({
-            "call_no": loop_count,
-            "fetched": len(items),
-            "time_filtered": time_filtered,
-        })
-        if stop_due_to_time:
-            break
-        start += DISPLAY_PER_CALL
+            collected.append((title, link))
+        loop_reports.append({"call_no": loop_count, "fetched": len(items), "time_filtered": time_filtered})
 
     latest_time = max(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
     earliest_time = min(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
@@ -185,8 +186,16 @@ def search_recent_news(search_keywords, filter_keywords):
 # ─────────────────────────────────────────────
 def run_bot():
     now = datetime.now(KST)
-    current_hour = now.hour
-    print(f"\n🕒 현재 {now.strftime('%Y-%m-%d %H:%M:%S')} KST 실행 시작")
+    print(f"\n🕒 실행: {now.strftime('%Y-%m-%d %H:%M:%S')} KST")
+
+    # ✅ 짝수시 정시(00분)만 발송
+    if now.minute != 0 or now.hour % 2 != 0:
+        print("⏸️ 발송 타임이 아님 → 스킵")
+        return
+
+    if already_sent_this_hour():
+        print("⏹️ 이미 이번 시각에 발송 완료 → 중복 방지")
+        return
 
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
     filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
@@ -194,45 +203,41 @@ def run_bot():
 
     sent_count = len(found)
     total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
-    should_send = (sent_count >= 1 if current_hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
+    should_send = (sent_count >= 1 if now.hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
 
+    if should_send and found:
+        msg = "\n".join([f"{i+1}. <b>{html.escape(t)}</b>\n{l}" for i, (t, l) in enumerate(found)])
+        if send_to_telegram(msg):
+            mark_sent_now()
+            if pub_times:
+                mark_checked_time(max(pub_times))
+            print("✅ 본 채널 발송 완료")
+    else:
+        print("⏸️ 본채널 발송 조건 미충족")
+
+    # ✅ 관리자 리포트 (짝수시마다 1회)
     report = []
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
-    report.append(f"{status_icon} <b>{status_text}</b> [<b>{sent_count}</b>건] ({now.strftime('%H:%M:%S KST')} 기준)")
+    report.append(f"{status_icon} <b>{status_text}</b> [{sent_count}건] ({now.strftime('%H:%M')})")
     for r in loop_reports:
-        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
-    report.append(f"(제목통과) <b>{sent_count}</b> / 최신<b>{total_time_filtered}</b>")
-    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
-
-    if should_send and found:
-        message = "\n".join([f"{i+1}. <b>{html.escape(t)}</b>\n{l}\n" for i, (t, l) in enumerate(found)])
-        ok = send_to_telegram(message)
-        if ok and pub_times:
-            latest_pub = max(pub_times)
-            mark_checked_time(latest_pub)
-            print(f"🕓 최신 기사 시각 갱신 완료 → {latest_pub.strftime('%Y-%m-%d %H:%M:%S')}")
-    else:
-        print("⏸️ 본채널 발송 조건 미충족 → 관리자 리포트만 발송")
-
+        report.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
+    report.append(f"(최신기사시간) {latest_time}~{earliest_time}")
     send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
-    print("✅ 관리자 리포트 전송 완료")
+    print("📊 관리자 리포트 발송 완료")
 
 # ─────────────────────────────────────────────
-# 2시간마다 정시 실행 루프
+# 2시간 루프
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     if already_running():
         sys.exit(0)
 
-    print("🚀 fcanews bot 시작 (정시 보장 / 2시간 간격 루프)")
+    print("🚀 fcanews bot 시작 (짝수시 정시 / 2시간 간격)")
     while True:
         try:
             now = datetime.now(KST)
-            # 현재 시각에서 다음 짝수시(정시) 계산
-            next_hour = (now.hour + 1) // 2 * 2
-            if now.hour % 2 == 0 and now.minute < 5:
-                next_hour = now.hour  # 정시 직후면 바로 실행
+            next_hour = (now.hour + 2) // 2 * 2
             if next_hour >= 24:
                 next_hour -= 24
                 next_day = now + timedelta(days=1)
@@ -241,7 +246,6 @@ if __name__ == "__main__":
 
             target_time = next_day.replace(hour=next_hour, minute=0, second=0, microsecond=0)
             wait_seconds = (target_time - now).total_seconds()
-
             if wait_seconds > 0:
                 print(f"⏰ 다음 실행 시각: {target_time.strftime('%Y-%m-%d %H:%M:%S')} KST ({int(wait_seconds/60)}분 후)")
                 time.sleep(wait_seconds)
@@ -254,5 +258,4 @@ if __name__ == "__main__":
 
         finally:
             clear_lock()
-            # 다음 정시까지 다시 루프 반복
             time.sleep(10)

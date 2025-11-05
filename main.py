@@ -30,7 +30,8 @@ PERSISTENT_MOUNT = os.getenv("PERSISTENT_MOUNT", "/data")
 os.makedirs(PERSISTENT_MOUNT, exist_ok=True)
 
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
-FILTER_KEYWORDS_FILE = "filter_keywords.txt"
+FILTER_KEYWORDS_FILE = "filter_keywords.txt"     # 포함(통과) 필터
+EXCLUDE_KEYWORDS_FILE = "exclude_keywords.txt"   # ⬅️ 추가: 제외 필터
 LAST_SENT_FILE = os.path.join(PERSISTENT_MOUNT, "last_sent_time.txt")
 LAST_CHECKED_FILE = os.path.join(PERSISTENT_MOUNT, "last_checked_time.txt")
 LOCK_FILE = "/tmp/fcanews.lock"
@@ -124,19 +125,22 @@ def send_to_telegram(message, chat_id=None):
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     try:
         r = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            print("❌ 텔레그램 응답:", r.status_code, r.text)
         return r.status_code == 200
     except Exception as e:
         print("❌ 텔레그램 전송 예외:", e)
         return False
 
 # ─────────────────────────────────────────────
-# 뉴스 검색 (최적화 버전)
+# 뉴스 검색 (최적화 + 제외필터)
 # ─────────────────────────────────────────────
-def search_recent_news(search_keywords, filter_keywords):
+def search_recent_news(search_keywords, include_keywords, exclude_keywords):
     """
     최신 기사만 효율적으로 검색:
     - 30건이 모두 최신 기사일 때만 다음 페이지 호출
     - 이전 기사 등장 시 즉시 종료
+    - include(포함) / exclude(제외) 제목 필터 적용
     """
     base_url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
@@ -170,6 +174,8 @@ def search_recent_news(search_keywords, filter_keywords):
 
         time_filtered = 0
         new_articles = 0
+        title_include_fail = 0
+        title_exclude_hit = 0
 
         for item in items:
             title = html.unescape(item.get("title", "")).replace("<b>", "").replace("</b>", "")
@@ -192,14 +198,26 @@ def search_recent_news(search_keywords, filter_keywords):
             pub_times.append(pub_dt)
             time_filtered += 1
 
-            if not any(k.lower() in title.lower() for k in filter_keywords):
+            # 1) 포함(통과) 필터: 비어 있으면 통과, 있으면 하나라도 포함해야 통과
+            if include_keywords:
+                if not any(kw.lower() in title.lower() for kw in include_keywords):
+                    title_include_fail += 1
+                    continue
+
+            # 2) 제외 필터: 하나라도 걸리면 즉시 제외
+            if exclude_keywords and any(ek.lower() in title.lower() for ek in exclude_keywords):
+                title_exclude_hit += 1
                 continue
+
+            # 3) 최종 통과
             collected.append((title, link))
 
         loop_reports.append({
             "call_no": loop_count,
             "fetched": len(items),
             "time_filtered": time_filtered,
+            "title_include_fail": title_include_fail,
+            "title_exclude_hit": title_exclude_hit,
         })
 
         # ✅ 루프 종료 조건
@@ -213,7 +231,6 @@ def search_recent_news(search_keywords, filter_keywords):
     latest_time = max(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
     earliest_time = min(pub_times).strftime("%m-%d(%H:%M)") if pub_times else "N/A"
     return collected, loop_reports, latest_time, earliest_time, pub_times
-
 
 # ─────────────────────────────────────────────
 # 메인 실행
@@ -232,11 +249,18 @@ def run_bot():
         return
 
     search_keywords = load_keywords(SEARCH_KEYWORDS_FILE)
-    filter_keywords = load_keywords(FILTER_KEYWORDS_FILE)
-    found, loop_reports, latest_time, earliest_time, pub_times = search_recent_news(search_keywords, filter_keywords)
+    include_keywords = load_keywords(FILTER_KEYWORDS_FILE)
+    exclude_keywords = load_keywords(EXCLUDE_KEYWORDS_FILE)
+
+    found, loop_reports, latest_time, earliest_time, pub_times = search_recent_news(
+        search_keywords, include_keywords, exclude_keywords
+    )
 
     sent_count = len(found)
     total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
+    total_excluded = sum(r["title_exclude_hit"] for r in loop_reports)
+
+    # 강제 시간(0/6/12/18)은 최소 1건이면 발송, 그 외 시간은 MIN_SEND_THRESHOLD 이상이면 발송
     should_send = (sent_count >= 1 if now.hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
 
     if should_send and found:
@@ -249,25 +273,30 @@ def run_bot():
     else:
         print("⏸️ 본채널 발송 조건 미충족")
 
-    # ✅ 관리자 리포트 (짝수시마다 1회)
+    # ✅ 관리자 리포트 (짝수시마다 1회) — 요청 포맷 적용
     now = datetime.now(KST)
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
-    
-    report = []
+
+    report_lines = []
     # 1️⃣ 1행 — 상태
-    report.append(f"{status_icon} {status_text} [<b>{len(found)}</b>건] ({now.strftime('%H:%M:%S 기준')})")
-    
+    # 예: ✅ 발송 [5건] (14:00:01 기준)
+    report_lines.append(f"{status_icon} {status_text} [{sent_count}건] ({now.strftime('%H:%M:%S')} 기준)")
+
     # 2️⃣ 각 호출 결과
+    # 예: (1차) 최신6 / 호출30
     for r in loop_reports:
-        report.append(f"({r['call_no']}차) 최신<b>{r['time_filtered']}</b> / 호출{r['fetched']}")
-    
-    # 3️⃣ 제목통과 / 최신합계
-    report.append(f"제목통과<b>{len(found)}</b> / 최신{sum(r['time_filtered'] for r in loop_reports)}")
-    
+        report_lines.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
+
+    # 3️⃣ 제목통과 / 최신합계 — 제외 카운트 병기
+    # 예: 제목통과5(제외0) / 최신6
+    report_lines.append(f"제목통과{sent_count}(제외{total_excluded}) / 최신{total_time_filtered}")
+
     # 4️⃣ 최신기사 시간
-    report.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
-    send_to_telegram("\n".join(report), chat_id=ADMIN_CHAT_ID)
+    # 예: (최신기사시간) 11-05(13:48) ~ 11-05(12:00)
+    report_lines.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
+
+    send_to_telegram("\n".join(report_lines), chat_id=ADMIN_CHAT_ID)
     print("📊 관리자 리포트 발송 완료")
 
 # ─────────────────────────────────────────────
@@ -281,12 +310,12 @@ if __name__ == "__main__":
     while True:
         try:
             now = datetime.now(KST)
-            next_hour = (now.hour + 2) // 2 * 2
+            # 다음 짝수시 정시 계산
+            next_hour = ((now.hour + 2) // 2) * 2
+            next_day = now
             if next_hour >= 24:
                 next_hour -= 24
                 next_day = now + timedelta(days=1)
-            else:
-                next_day = now
 
             target_time = next_day.replace(hour=next_hour, minute=0, second=0, microsecond=0)
             wait_seconds = (target_time - now).total_seconds()

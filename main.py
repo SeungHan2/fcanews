@@ -141,6 +141,8 @@ def search_recent_news(search_keywords, include_keywords, exclude_keywords):
     - 30건이 모두 최신 기사일 때만 다음 페이지 호출
     - 이전 기사 등장 시 즉시 종료
     - include(포함) / exclude(제외) 제목 필터 적용
+    반환: found, loop_reports, latest_time, earliest_time, pub_times
+    loop_reports[*].title_include_pass = 포함 필터 통과 수(이후 제외 포함)
     """
     base_url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
@@ -199,10 +201,12 @@ def search_recent_news(search_keywords, include_keywords, exclude_keywords):
             time_filtered += 1
 
             # 1) 포함(통과) 필터: 비어 있으면 통과, 있으면 하나라도 포함해야 통과
+            include_ok = True
             if include_keywords:
-                if not any(kw.lower() in title.lower() for kw in include_keywords):
-                    title_include_fail += 1
-                    continue
+                include_ok = any(kw.lower() in title.lower() for kw in include_keywords)
+            if not include_ok:
+                title_include_fail += 1
+                continue
 
             # 2) 제외 필터: 하나라도 걸리면 즉시 제외
             if exclude_keywords and any(ek.lower() in title.lower() for ek in exclude_keywords):
@@ -212,11 +216,15 @@ def search_recent_news(search_keywords, include_keywords, exclude_keywords):
             # 3) 최종 통과
             collected.append((title, link))
 
+        # 포함 통과 수(제외 포함): 최신 처리된 것 중 포함 실패를 뺀 값
+        title_include_pass = max(0, time_filtered - title_include_fail)
+
         loop_reports.append({
             "call_no": loop_count,
             "fetched": len(items),
             "time_filtered": time_filtered,
             "title_include_fail": title_include_fail,
+            "title_include_pass": title_include_pass,
             "title_exclude_hit": title_exclude_hit,
         })
 
@@ -256,12 +264,13 @@ def run_bot():
         search_keywords, include_keywords, exclude_keywords
     )
 
-    sent_count = len(found)
-    total_time_filtered = sum(r["time_filtered"] for r in loop_reports)
+    sent_final = len(found)  # 최종 통과(제외 제외)
+    total_latest = sum(r["time_filtered"] for r in loop_reports)
     total_excluded = sum(r["title_exclude_hit"] for r in loop_reports)
+    total_include_pass = sum(r["title_include_pass"] for r in loop_reports)
 
     # 강제 시간(0/6/12/18)은 최소 1건이면 발송, 그 외 시간은 MIN_SEND_THRESHOLD 이상이면 발송
-    should_send = (sent_count >= 1 if now.hour in FORCE_HOURS else sent_count >= MIN_SEND_THRESHOLD)
+    should_send = (sent_final >= 1 if now.hour in FORCE_HOURS else sent_final >= MIN_SEND_THRESHOLD)
 
     if should_send and found:
         msg = "\n".join([f"{i+1}. <b>{html.escape(t)}</b>\n{l}" for i, (t, l) in enumerate(found)])
@@ -279,10 +288,10 @@ def run_bot():
     status_text = "발송" if should_send and found else "보류"
 
     report_lines = []
-    # 1) 상태
-    report_lines.append(f"{status_icon} {status_text} [{sent_count}건] ({now.strftime('%H:%M:%S')} 기준)")
-    # 2) 집계 (제외/제목통과/최신합)
-    report_lines.append(f"(제외{total_excluded}) 제목통과 {sent_count} / 최신{total_time_filtered}")
+    # 1) 상태 — 대괄호 수치는 최종 발송 후보 수(=제외 제외 후)
+    report_lines.append(f"{status_icon} {status_text} [{sent_final}건] ({now.strftime('%H:%M:%S')} 기준)")
+    # 2) 집계 — 제목통과는 포함 필터 통과 수(제외 포함)
+    report_lines.append(f"(제외{total_excluded}) 제목통과 {total_include_pass} / 최신{total_latest}")
     # 3) 각 호출 결과
     for r in loop_reports:
         report_lines.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")

@@ -1,5 +1,5 @@
 # ===============================================
-# main.py — fcanews 자동 발송 (짝수시 정시 / /data 기록 유지 / 관리자 리포트 무제한)
+# main.py — fcanews 자동 발송 (짝수시 정시 / /data 기록 유지 / 관리자 리포트)
 # ===============================================
 import os
 import sys
@@ -31,7 +31,7 @@ os.makedirs(PERSISTENT_MOUNT, exist_ok=True)
 
 SEARCH_KEYWORDS_FILE = "search_keywords.txt"
 FILTER_KEYWORDS_FILE = "filter_keywords.txt"     # 포함(통과) 필터
-EXCLUDE_KEYWORDS_FILE = "exclude_keywords.txt"   # ⬅️ 추가: 제외 필터
+EXCLUDE_KEYWORDS_FILE = "exclude_keywords.txt"   # 제외 필터
 LAST_SENT_FILE = os.path.join(PERSISTENT_MOUNT, "last_sent_time.txt")
 LAST_CHECKED_FILE = os.path.join(PERSISTENT_MOUNT, "last_checked_time.txt")
 LOCK_FILE = "/tmp/fcanews.lock"
@@ -273,28 +273,21 @@ def run_bot():
     else:
         print("⏸️ 본채널 발송 조건 미충족")
 
-    # ✅ 관리자 리포트 (짝수시마다 1회) — 요청 포맷 적용
+    # ✅ 관리자 리포트 — 새 포맷
     now = datetime.now(KST)
     status_icon = "✅" if should_send and found else "⏸️"
     status_text = "발송" if should_send and found else "보류"
 
     report_lines = []
-    # 1️⃣ 1행 — 상태
-    # 예: ✅ 발송 [5건] (14:00:01 기준)
+    # 1) 상태
     report_lines.append(f"{status_icon} {status_text} [{sent_count}건] ({now.strftime('%H:%M:%S')} 기준)")
-
-    # 2️⃣ 각 호출 결과
-    # 예: (1차) 최신6 / 호출30
+    # 2) 집계 (제외/제목통과/최신합)
+    report_lines.append(f"(제외{total_excluded}) 제목통과 {sent_count} / 최신{total_time_filtered}")
+    # 3) 각 호출 결과
     for r in loop_reports:
         report_lines.append(f"({r['call_no']}차) 최신{r['time_filtered']} / 호출{r['fetched']}")
-
-    # 3️⃣ 제목통과 / 최신합계 — 제외 카운트 병기
-    # 예: 제목통과5(제외0) / 최신6
-    report_lines.append(f"제목통과{sent_count}(제외{total_excluded}) / 최신{total_time_filtered}")
-
-    # 4️⃣ 최신기사 시간
-    # 예: (최신기사시간) 11-05(13:48) ~ 11-05(12:00)
-    report_lines.append(f"(최신기사시간) {latest_time} ~ {earliest_time}")
+    # 4) 최신 시간
+    report_lines.append(f"(최신) {latest_time} ~ {earliest_time}")
 
     send_to_telegram("\n".join(report_lines), chat_id=ADMIN_CHAT_ID)
     print("📊 관리자 리포트 발송 완료")

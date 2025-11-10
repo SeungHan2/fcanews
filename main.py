@@ -42,7 +42,7 @@ REQUEST_TIMEOUT = 30
 MIN_SEND_THRESHOLD = 3
 UA = "Mozilla/5.0 (compatible; fcanewsbot/3.0; +https://t.me/)"
 KST = timezone(timedelta(hours=9))
-FORCE_HOURS = {0, 6, 12, 18}
+FORCE_HOURS = {0, 8, 10, 12, 14, 16, 18, 20, 22}
 
 # ─────────────────────────────────────────────
 # 락 파일 관리
